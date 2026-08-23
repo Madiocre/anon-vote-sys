@@ -6,6 +6,100 @@ whatever absolute URL is in `candidates.image_url`.
 
 Those URLs point at **jsDelivr**, backed by a separate **public** GitHub repo holding the photos.
 
+---
+
+## Start here — the whole thing, concretely
+
+**There is nothing to install, sign up for, or configure.** jsDelivr is not a service you enable on
+your account. It is a public URL prefix that will serve any file from any public GitHub repo, on
+demand, the first time someone asks for it. "Using jsDelivr" means nothing more than *writing a
+different URL in `candidates.json`*.
+
+> One point of confusion worth clearing up: jsDelivr has **two** proxies. `cdn.jsdelivr.net/npm/…`
+> serves npm packages — that is what a page like `jsdelivr.com/package/npm/bun` is showing you, and
+> it has nothing to do with this. You want `cdn.jsdelivr.net/gh/…`, the **GitHub** proxy. Ignore
+> everything on the site about npm packages.
+
+Assume your GitHub username is `madiocre`. End to end:
+
+**1. Create a public repo for the images.**
+
+```bash
+gh repo create anon-vote-assets --public --description "Candidate images for anon-vote-sys" --clone
+```
+
+**2. Add the photos.**
+
+```bash
+cd anon-vote-assets && mkdir -p candidates
+```
+
+Copy the images in, named after the candidate ids you use in `candidates.json`:
+
+```
+anon-vote-assets/
+  README.md
+  LICENSE
+  candidates/
+    candidate-01.webp
+    candidate-02.webp
+    candidate-03.webp
+```
+
+**3. Commit, and tag it.** The tag is what makes the URL stable — see the caching section below.
+
+```bash
+git add -A && git commit -m "Add candidate images" && git push
+```
+
+```bash
+git tag v1 && git push --tags
+```
+
+**4. Work out the URL.** The pattern is:
+
+```
+https://cdn.jsdelivr.net/gh/<user>/<repo>@<tag>/<path-in-repo>
+```
+
+so for the tree above:
+
+```
+https://cdn.jsdelivr.net/gh/madiocre/anon-vote-assets@v1/candidates/candidate-01.webp
+```
+
+**5. Check it actually serves before touching the seed.** Paste it into a browser, or:
+
+```bash
+curl -I "https://cdn.jsdelivr.net/gh/madiocre/anon-vote-assets@v1/candidates/candidate-01.webp"
+```
+
+`HTTP/2 200` with `content-type: image/webp` means you are done — the file is now cached at
+jsDelivr's edge worldwide. A **404 almost always means the repo is private**, the tag was not pushed,
+or the path is wrong. There is no error message distinguishing those, so check in that order.
+
+**6. Put the URLs in the seed.** Edit `packages/db/seed/candidates.json`, replacing every
+`placehold.co` URL:
+
+```json
+{ "id": "candidate-01", "name": "Real Name", "imageUrl": "https://cdn.jsdelivr.net/gh/madiocre/anon-vote-assets@v1/candidates/candidate-01.webp", "sortOrder": 1 }
+```
+
+**7. Apply it.**
+
+```bash
+cd packages/db && bun run seed:staging
+```
+
+```bash
+cd packages/db && bun run seed:remote
+```
+
+That is the entire integration. No deploy — the ballot reads image URLs from D1, and the cached copy
+refreshes within `RESULTS_TTL_SECONDS`.
+
+---
+
 ## Why not raw.githubusercontent.com, and what jsDelivr actually changes
 
 Serving images straight from `raw.githubusercontent.com` puts GitHub in the request path for every

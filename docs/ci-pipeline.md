@@ -51,8 +51,11 @@ build fails before it starts.
 ### Build command
 
 ```
-cd ../.. && bun install --frozen-lockfile && bun run --cwd apps/web types && bun run typecheck && bun run --cwd apps/web build
+cd ../.. && bun install --frozen-lockfile && bun run --cwd apps/web types && bun run check && bun run --cwd apps/web build
 ```
+
+`bun run check` is `typecheck && test` — both gates in one script, so the dashboard setting does not
+have to change when the gate does.
 
 Three parts of that are load-bearing and not obvious:
 
@@ -102,19 +105,19 @@ Worker then has its own build project and they never collide.
 Option B is the real answer if you want branch pushes to land somewhere safe automatically. Start
 with A, move to B when branch previews start mattering.
 
-## Where tests plug in later
+## The test gate
 
-There is **no test suite yet** — nothing under `bun:test` exists, so today the gate is typecheck plus
-build. When you write specs, add `&& bun test` after `bun run typecheck` in the build command.
+`bun test` runs **87 tests** covering the whole server surface — see
+[testing.md](./testing.md) for what is covered, how the bindings are faked, and the two
+constraints that shape it (`mock.module` is process-global, and the results cache is module-level).
 
-Good first targets, all pure logic needing no Worker runtime:
+They run in plain Bun rather than workerd, which works because nothing in `src/server` imports a
+Durable Object class at runtime — `env.ts` pulls them in with `import type`, which is erased.
 
-- `signToken` / `verifyToken` round-trip — `apps/web/src/server/lib/crypto.ts`
-- the percentage maths in `aggregateResults` — `packages/db/src/index.ts`
-- `wantsJson` content negotiation — `apps/web/src/server/index.ts`
-
-Anything touching D1 or a Durable Object needs `@cloudflare/vitest-pool-workers` rather than plain
-`bun:test`, since those bindings only exist inside workerd.
+What that deliberately does **not** cover: real D1 SQL, real Durable Object storage and persistence,
+and the Workers Cache API. Those only exist inside workerd; covering them needs
+`@cloudflare/vitest-pool-workers`. So the suite proves the request logic is right, not that the SQL
+is. Keep the post-deploy checks in [deployment.md](./deployment.md) for that.
 
 ## Migrations stay manual
 

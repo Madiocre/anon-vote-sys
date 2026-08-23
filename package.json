@@ -7,7 +7,9 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "typecheck": "bun run --filter '*' typecheck"
+    "typecheck": "bun run --filter '*' typecheck",
+    "test": "bun test",
+    "check": "bun run typecheck && bun run test"
   },
   "devDependencies": {
     "@types/bun": "latest",

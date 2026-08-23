@@ -1,0 +1,20 @@
+{
+  // Test-only program. Separate from tsconfig.json purely so `types: ["bun"]`
+  // can be on here without leaking Bun globals into Worker source, where they
+  // do not exist at runtime and would mask real errors.
+  "extends": ["astro/tsconfigs/strict", "../../tsconfig.base.json"],
+  "compilerOptions": {
+    "types": ["bun"],
+    "noEmit": true
+  },
+  "include": [
+    "./worker-configuration.d.ts",
+    "src/**/*.test.ts",
+    "src/server/test-helpers.ts",
+    "src/server/db-mock.ts",
+    // Pulled in so the tests typecheck against the real modules rather than
+    // against inferred `any`.
+    "src/server/**/*.ts"
+  ],
+  "exclude": ["dist"]
+}

@@ -45,10 +45,9 @@ Astro.response.headers.set("cache-control", "no-store");
 
 <Layout title="Cast your vote" noIndex>
   <header class="page-header">
-    <h1>Cast your vote</h1>
+    <h1>Cheervote</h1>
     <p>
-      No sign-up, no account. Pick one candidate and press Vote — that's it. One vote per
-      person.
+      Cheer on your Model, Pick one every 3 days.
     </p>
   </header>
 
@@ -59,8 +58,7 @@ Astro.response.headers.set("cache-control", "no-store");
   {
     candidates.length === 0 ? (
       <p class="notice">
-        There are no candidates on the ballot yet. Seed the database with{" "}
-        <code>cd packages/db && bun run seed:local</code>.
+        There are no candidates on the ballot yet. Please Wait for the next round of voting to begin.
       </p>
     ) : (
       <ul class="grid" role="list">

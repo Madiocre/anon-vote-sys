@@ -16,6 +16,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import candidatesFile from "./candidates.json" with { type: "json" };
+const IMAGE_BASE_URL = "https://cdn.jsdelivr.net/gh/Madiocre/vote-images/";
 
 const HERE = import.meta.dirname;
 const PKG_ROOT = resolve(HERE, "..");
@@ -79,7 +80,7 @@ function buildSql(candidates: SeedCandidate[]): string {
     lines.push(
       `INSERT INTO candidates (id, name, image_url, sort_order, created_at) VALUES (${q(
         candidate.id,
-      )}, ${q(candidate.name)}, ${q(candidate.imageUrl)}, ${sortOrder}, unixepoch())`,
+      )}, ${q(candidate.name)}, ${q(IMAGE_BASE_URL + candidate.imageUrl)}, ${sortOrder}, unixepoch())`,
       `  ON CONFLICT(id) DO UPDATE SET name = excluded.name, image_url = excluded.image_url, sort_order = excluded.sort_order;`,
     );
   });

@@ -17,7 +17,7 @@
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "types": "wrangler types",
     "build:staging": "CLOUDFLARE_ENV=staging astro build",
     "deploy": "astro build && wrangler deploy",

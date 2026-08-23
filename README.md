@@ -13,6 +13,8 @@ before changing anything it covers.
 | [docs/deployment.md](docs/deployment.md) | Deploying to Cloudflare — pre-deploy gates, ordered commands, post-deploy checks, and the pre-launch reset |
 | [docs/images.md](docs/images.md) | Candidate images via jsDelivr: the public assets repo, why tags and never branches |
 | [docs/ci-pipeline.md](docs/ci-pipeline.md) | Cloudflare Workers Builds — build settings, the staging split, and why the environment is chosen at build time |
+| [docs/testing.md](docs/testing.md) | What the 87 server tests cover, what they deliberately do not, and how they run outside workerd |
+| [docs/edgecases.md](docs/edgecases.md) | Adding and removing candidates, shared IPs, cleared cookies — the niche cases with destructive consequences |
 
 ## Layout
 
@@ -44,6 +46,8 @@ cd packages/db && bun run migrate:local && bun run seed:local
 
 | Command | What it does |
 | --- | --- |
+| `bun run check` | Typecheck + tests — the same gate CI runs |
+| `bun run test` | 87 server tests |
 | `bun run typecheck` | Typechecks all three workspaces |
 | `cd apps/web && bun run dev` | Astro dev server |
 | `cd apps/web && bun run build` | Production build |
@@ -73,7 +77,8 @@ Known gaps, both deliberate:
 - **`.astro` files are not typechecked.** `astro check` cannot run against TypeScript 7 — its
   language server needs a programmatic API the native compiler does not expose yet. `astro build`
   catches syntax, import and template errors in those files, but not frontmatter type errors.
-- **No CI.** Deployment is manual; [docs/ci-pipeline.md](docs/ci-pipeline.md) has the criteria for a
-  workflow.
+- **Tests stop at the workerd boundary.** The 87 server tests cover the request logic, but real D1
+  SQL, Durable Object persistence and the Workers Cache API are stubbed — covering those needs
+  `@cloudflare/vitest-pool-workers`. See [docs/testing.md](docs/testing.md).
 
 A load-balancing script is a planned follow-up.

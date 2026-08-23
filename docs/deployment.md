@@ -112,9 +112,22 @@ cd apps/web && bun x wrangler secret put COOKIE_SECRET
 cd apps/web && bun x wrangler secret put TURNSTILE_SECRET
 ```
 
-Use long random values for the first two (`openssl rand -base64 32`). Until all three are set, every
-request that needs one fails — `requireSecret()` throws, `app.onError` catches it, and the client
-gets a `server_error` JSON 500.
+**Two of the three you generate; one you cannot.**
+
+`VOTE_SALT` and `COOKIE_SECRET` are just long unpredictable strings — not key pairs, not hashes of
+anything. Generate each separately:
+
+```bash
+openssl rand -base64 32
+```
+
+`TURNSTILE_SECRET` is **issued by Cloudflare** and must pair with the sitekey rendered into the page.
+A random value here cannot work: siteverify would reject every challenge and no vote would ever be
+accepted. Take it from the Turnstile widget you created in gate 1.
+
+Production values must differ from the ones in your local `.dev.vars` — that file is local-only and
+is never read in production. Until all three are set, every request that needs one fails:
+`requireSecret()` throws, `app.onError` catches it, and the client gets a `server_error` JSON 500.
 
 > **`VOTE_SALT` must never be rotated once real voting starts.** It is the input to the `ip_hash`
 > (`apps/web/src/server/lib/identity.ts`), so changing it re-hashes every voter into a brand-new

@@ -18,12 +18,126 @@
     "To change a photo: commit it, re-tag the assets repo, bump the tag here, then",
     "re-run `bun run seed:remote`."
   ],
-  "candidates": [
-    { "id": "candidate-01", "name": "Candidate One", "imageUrl": "https://placehold.co/400x400?text=1", "sortOrder": 1 },
-    { "id": "candidate-02", "name": "Candidate Two", "imageUrl": "https://placehold.co/400x400?text=2", "sortOrder": 2 },
-    { "id": "candidate-03", "name": "Candidate Three", "imageUrl": "https://placehold.co/400x400?text=3", "sortOrder": 3 },
-    { "id": "candidate-04", "name": "Candidate Four", "imageUrl": "https://placehold.co/400x400?text=4", "sortOrder": 4 },
-    { "id": "candidate-05", "name": "Candidate Five", "imageUrl": "https://placehold.co/400x400?text=5", "sortOrder": 5 },
-    { "id": "candidate-06", "name": "Candidate Six", "imageUrl": "https://placehold.co/400x400?text=6", "sortOrder": 6 }
+    "candidates": [
+    {
+      "id": "candidate-01",
+      "name": "Candidate 01",
+      "imageUrl": "candidate-01.svg",
+      "sortOrder": 1
+    },
+    {
+      "id": "candidate-02",
+      "name": "Candidate 02",
+      "imageUrl": "candidate-02.svg",
+      "sortOrder": 2
+    },
+    {
+      "id": "candidate-03",
+      "name": "Candidate 03",
+      "imageUrl": "candidate-03.svg",
+      "sortOrder": 3
+    },
+    {
+      "id": "candidate-04",
+      "name": "Candidate 04",
+      "imageUrl": "candidate-04.svg",
+      "sortOrder": 4
+    },
+    {
+      "id": "candidate-05",
+      "name": "Candidate 05",
+      "imageUrl": "candidate-05.svg",
+      "sortOrder": 5
+    },
+    {
+      "id": "candidate-06",
+      "name": "Candidate 06",
+      "imageUrl": "candidate-06.svg",
+      "sortOrder": 6
+    },
+    {
+      "id": "candidate-07",
+      "name": "Candidate 07",
+      "imageUrl": "candidate-07.svg",
+      "sortOrder": 7
+    },
+    {
+      "id": "candidate-08",
+      "name": "Candidate 08",
+      "imageUrl": "candidate-08.svg",
+      "sortOrder": 8
+    },
+    {
+      "id": "candidate-09",
+      "name": "Candidate 09",
+      "imageUrl": "candidate-09.svg",
+      "sortOrder": 9
+    },
+    {
+      "id": "candidate-10",
+      "name": "Candidate 10",
+      "imageUrl": "candidate-10.svg",
+      "sortOrder": 10
+    },
+    {
+      "id": "candidate-11",
+      "name": "Candidate 11",
+      "imageUrl": "candidate-11.svg",
+      "sortOrder": 11
+    },
+    {
+      "id": "candidate-12",
+      "name": "Candidate 12",
+      "imageUrl": "candidate-12.svg",
+      "sortOrder": 12
+    },
+    {
+      "id": "candidate-13",
+      "name": "Candidate 13",
+      "imageUrl": "candidate-13.svg",
+      "sortOrder": 13
+    },
+    {
+      "id": "candidate-14",
+      "name": "Candidate 14",
+      "imageUrl": "candidate-14.svg",
+      "sortOrder": 14
+    },
+    {
+      "id": "candidate-15",
+      "name": "Candidate 15",
+      "imageUrl": "candidate-15.svg",
+      "sortOrder": 15
+    },
+    {
+      "id": "candidate-16",
+      "name": "Candidate 16",
+      "imageUrl": "candidate-16.svg",
+      "sortOrder": 16
+    },
+    {
+      "id": "candidate-17",
+      "name": "Candidate 17",
+      "imageUrl": "candidate-17.svg",
+      "sortOrder": 17
+    },
+    {
+      "id": "candidate-18",
+      "name": "Candidate 18",
+      "imageUrl": "candidate-18.svg",
+      "sortOrder": 18
+    },
+    {
+      "id": "candidate-19",
+      "name": "Candidate 19",
+      "imageUrl": "candidate-19.svg",
+      "sortOrder": 19
+    },
+    {
+      "id": "candidate-20",
+      "name": "Candidate 20",
+      "imageUrl": "candidate-20.svg",
+      "sortOrder": 20
+    }
   ]
 }

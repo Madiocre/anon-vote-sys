@@ -1,22 +1,53 @@
 # Copy to `.dev.vars` (gitignored) and fill in before running `bun run dev`.
 #
-# In production these are set with `wrangler secret put <NAME>` instead, EXCEPT
-# TURNSTILE_SITEKEY, which is public and lives under "vars" in wrangler.jsonc.
+#   cp .dev.vars.example .dev.vars
+#
+# Two of these you generate yourself. One you CANNOT generate — read on.
+#
+# Generate a value for VOTE_SALT and COOKIE_SECRET with:
+#
+#   openssl rand -base64 32
+#
+# Use a DIFFERENT random value for each, and different values again in
+# production. These are not "sha256 keys" or key pairs — they are just long
+# unpredictable strings. What matters is entropy, not format: 32 random bytes
+# from a CSPRNG. Do not reuse a password, a git SHA, or a UUID.
+#
+# THESE ARE LOCAL-ONLY. `.dev.vars` is never read in production. Production
+# secrets are set once with `wrangler secret put <NAME>` and live in Cloudflare —
+# see docs/deployment.md. Staging is separate again:
+# `wrangler secret put <NAME> --env staging`.
 #
 # server/lib/identity.ts's requireSecret() throws on the first request if any of
-# the three secrets below is missing, so dev fails fast rather than silently
-# hashing against an empty salt.
+# these is missing or empty, so dev fails fast rather than silently signing with
+# an empty key.
 
 # Salt for the SHA-256 IP hash (server/lib/identity.ts computeIpHash).
-# Any long random string. Changing it invalidates every existing ip_hash, which
-# effectively resets IP-based dedup — do not rotate it mid-election.
-VOTE_SALT="dev-only-change-me"
+# Generate: openssl rand -base64 32
+#
+# NEVER rotate this once real voting has started. It is the input to ip_hash, so
+# changing it re-hashes every voter into a new identity — silently voiding
+# IP-based dedup for everyone who already voted, and orphaning every VoteGate
+# claim. (The one time rotating is correct is the pre-launch reset in
+# docs/deployment.md, which is exactly why it works there.)
+VOTE_SALT="replace-me-with-openssl-rand-base64-32"
 
 # HMAC key for the signed vote cookie (server/lib/crypto.ts signToken).
-# Changing it invalidates every issued vote cookie; voters fall back to the D1
-# lookup path, so it is recoverable, just slower.
-COOKIE_SECRET="dev-only-change-me"
+# Generate: openssl rand -base64 32
+#
+# Safer to rotate than VOTE_SALT: it invalidates every issued vote cookie, so
+# voters fall back to the D1 lookup path. Slower, but not lossy.
+COOKIE_SECRET="replace-me-with-openssl-rand-base64-32"
 
-# Turnstile SECRET key — server side only, never sent to the browser.
-# Test key that always passes: 1x0000000000000000000000000000000AA
+# Turnstile SECRET key — DO NOT GENERATE THIS ONE.
+#
+# It is issued by Cloudflare and must match the sitekey rendered into the page,
+# so a random value cannot work: siteverify would reject every challenge and no
+# vote would ever be accepted. Get the real pair from the Cloudflare dashboard
+# under Turnstile, where the sitekey goes in wrangler.jsonc's `vars` (it is
+# public) and the secret goes here / into `wrangler secret put`.
+#
+# The value below is Cloudflare's documented ALWAYS-PASSES test secret, which is
+# the correct thing to use locally and on staging. Its matching test sitekey
+# (1x00000000000000000000AA) is already set in wrangler.jsonc.
 TURNSTILE_SECRET="1x0000000000000000000000000000000AA"

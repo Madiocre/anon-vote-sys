@@ -1,0 +1,26 @@
+{
+    "name": "@avs/db",
+    "version": "0.3.2",
+    "private": true,
+    "type": "module",
+    "exports": {
+        ".": "./src/index.ts"
+    },
+    "scripts": {
+        "typecheck": "tsc --noEmit",
+        "migrate:local": "wrangler d1 migrations apply anon-vote-sys --local --config ../../apps/web/wrangler.jsonc",
+        "migrate:remote": "wrangler d1 migrations apply anon-vote-sys --remote --config ../../apps/web/wrangler.jsonc",
+        "seed:local": "bun run seed/seed.ts --local",
+        "seed:remote": "bun run seed/seed.ts --remote",
+        "reset:local": "bun run seed/reset.ts",
+        "generate": "drizzle-kit generate"
+    },
+    "dependencies": {
+        "@avs/shared": "workspace:*",
+        "@types/bun": "^1.4.0",
+        "drizzle-orm": "1.0.0-rc.4"
+    },
+    "devDependencies": {
+        "drizzle-kit": "1.0.0-rc.5-ab785fc"
+    }
+}

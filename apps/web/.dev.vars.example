@@ -1,0 +1,22 @@
+# Copy to `.dev.vars` (gitignored) and fill in before running `bun run dev`.
+#
+# In production these are set with `wrangler secret put <NAME>` instead, EXCEPT
+# TURNSTILE_SITEKEY, which is public and lives under "vars" in wrangler.jsonc.
+#
+# server/lib/identity.ts's requireSecret() throws on the first request if any of
+# the three secrets below is missing, so dev fails fast rather than silently
+# hashing against an empty salt.
+
+# Salt for the SHA-256 IP hash (server/lib/identity.ts computeIpHash).
+# Any long random string. Changing it invalidates every existing ip_hash, which
+# effectively resets IP-based dedup — do not rotate it mid-election.
+VOTE_SALT="dev-only-change-me"
+
+# HMAC key for the signed vote cookie (server/lib/crypto.ts signToken).
+# Changing it invalidates every issued vote cookie; voters fall back to the D1
+# lookup path, so it is recoverable, just slower.
+COOKIE_SECRET="dev-only-change-me"
+
+# Turnstile SECRET key — server side only, never sent to the browser.
+# Test key that always passes: 1x0000000000000000000000000000000AA
+TURNSTILE_SECRET="1x0000000000000000000000000000000AA"

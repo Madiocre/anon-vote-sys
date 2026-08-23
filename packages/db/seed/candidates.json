@@ -1,0 +1,18 @@
+{
+  "$comment": [
+    "Each entry becomes one voting card.",
+    "  id        - stable slug, used as the primary key. Changing it creates a NEW candidate.",
+    "  name      - the single name sentence shown under the image.",
+    "  imageUrl  - absolute URL to the candidate's image.",
+    "  sortOrder - tie-breaker ordering on both the voting grid and the results page.",
+    "Re-running the seed upserts by id: names and images update, existing votes are kept."
+  ],
+  "candidates": [
+    { "id": "candidate-01", "name": "Candidate One", "imageUrl": "https://placehold.co/400x400?text=1", "sortOrder": 1 },
+    { "id": "candidate-02", "name": "Candidate Two", "imageUrl": "https://placehold.co/400x400?text=2", "sortOrder": 2 },
+    { "id": "candidate-03", "name": "Candidate Three", "imageUrl": "https://placehold.co/400x400?text=3", "sortOrder": 3 },
+    { "id": "candidate-04", "name": "Candidate Four", "imageUrl": "https://placehold.co/400x400?text=4", "sortOrder": 4 },
+    { "id": "candidate-05", "name": "Candidate Five", "imageUrl": "https://placehold.co/400x400?text=5", "sortOrder": 5 },
+    { "id": "candidate-06", "name": "Candidate Six", "imageUrl": "https://placehold.co/400x400?text=6", "sortOrder": 6 }
+  ]
+}

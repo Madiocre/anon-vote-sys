@@ -1,0 +1,17 @@
+{
+  "name": "anon-vote-sys",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "typecheck": "bun run --filter '*' typecheck"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^7",
+    "wrangler": "^4.125.0"
+  }
+}

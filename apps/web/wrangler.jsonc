@@ -1,0 +1,64 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "anon-vote-sys",
+	// Custom entrypoint, required the moment a DO class is declared under
+	// "exports" below — Astro's stock entrypoint exports only a fetch handler,
+	// and the adapter prerenders in workerd, so even `astro build` fails without
+	// this. src/worker.ts re-exports both DO classes (AGENTS.md §2).
+	"main": "src/worker.ts",
+	"compatibility_date": "2026-08-22",
+	"compatibility_flags": ["global_fetch_strictly_public"],
+	"assets": {
+		"directory": "./dist",
+		"binding": "ASSETS"
+	},
+	"observability": {
+		"enabled": true
+	},
+	"vars": {
+		// AGENTS.md §3 — B's Cache-API read-through, 10 minutes.
+		"RESULTS_TTL_SECONDS": "600",
+		// Turnstile's PUBLIC sitekey. Rendered into the ballot markup, so it is a
+		// var and not a secret. This is Cloudflare's always-passes test key —
+		// swap for the real one before deploying.
+		"TURNSTILE_SITEKEY": "1x00000000000000000000AA"
+	},
+	"d1_databases": [
+		{
+			// Every code path reads `env.DB` — see src/server/env.ts.
+			"binding": "DB",
+			"database_name": "anon-vote-sys",
+			"database_id": "059ed4d2-54be-4f03-90a8-9d02af8253a9",
+			// drizzle-kit v1 emits migrations/<timestamp>_<name>/migration.sql
+			// rather than a flat migrations/*.sql. Wrangler discovers that nested
+			// layout only when migrations_pattern is set explicitly; both paths
+			// are relative to this file, and the pattern must start with
+			// migrations_dir.
+			"migrations_dir": "../../packages/db/migrations",
+			"migrations_pattern": "../../packages/db/migrations/*/migration.sql"
+		}
+	],
+	// What the code actually calls: env.VOTE_GATE / env.RATE_LIMITER.
+	"durable_objects": {
+		"bindings": [
+			{ "name": "VOTE_GATE", "class_name": "VoteGate" },
+			{ "name": "RATE_LIMITER", "class_name": "RateLimiter" }
+		]
+	},
+	// DO lifecycle declaration. Mutually exclusive with the legacy `migrations`
+	// array — never write both (AGENTS.md §2).
+	"exports": {
+		"VoteGate": { "type": "durable-object", "storage": "sqlite" },
+		"RateLimiter": { "type": "durable-object", "storage": "sqlite" }
+	},
+	// Rate limiting layer 1 (AGENTS.md §5): native binding, scoped per Cloudflare
+	// location. Absorbs bursts at the edge before a DO round trip is paid for.
+	// `period` accepts only 10 or 60.
+	"ratelimits": [
+		{
+			"name": "EDGE_RATE_LIMITER",
+			"namespace_id": "1001",
+			"simple": { "limit": 20, "period": 60 }
+		}
+	]
+}

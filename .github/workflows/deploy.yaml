@@ -1,0 +1,137 @@
+name: Deploy
+
+# Promotion pipeline: nothing reaches production without passing through staging
+# first. The chain is gate -> staging -> smoke -> production, and each job
+# `needs` the previous one, so a failure anywhere stops the promotion.
+#
+# This exists because deploying straight to production is an easy habit to fall
+# into when the command is one line. Here it simply is not reachable that way.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "scripts/**"
+      - "bun.lock"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+    inputs:
+      staging_only:
+        description: Deploy to staging and stop (skip production)
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # 1. The offline gate: typecheck + 87 unit tests + build.
+  check:
+    name: Typecheck and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      # worker-configuration.d.ts is gitignored; without regenerating it the
+      # typecheck fails with 19 "cannot find name/module" errors. No creds needed.
+      - run: bun run --cwd apps/web types
+      - run: bun run check
+      - run: bun run --cwd apps/web build
+
+  # 2. Deploy to staging — its own Worker, D1, DO namespaces and rate limiter.
+  staging:
+    name: Deploy to staging
+    needs: check
+    runs-on: ubuntu-latest
+    outputs:
+      url: ${{ steps.deploy.outputs.deployment-url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - run: bun run --cwd apps/web types
+
+      # The environment is selected at BUILD time. `wrangler deploy --env staging`
+      # would silently ship production bindings, because the Astro adapter
+      # flattens wrangler.jsonc into dist/server/wrangler.json with no `env`
+      # block. build:staging sets CLOUDFLARE_ENV, which is what actually works.
+      - run: bun run --cwd apps/web build:staging
+
+      - id: deploy
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: apps/web
+          packageManager: bun
+          command: deploy
+
+  # 3. The second testing phase, against a real deployment.
+  #
+  # `bun test` stubs every binding, so it cannot catch a missing D1 binding, an
+  # unmigrated database, an unset secret, or a Worker that fails to boot. This
+  # can. Read-only: it never casts a vote, because that would burn a VoteGate
+  # claim for the runner's IP and those cannot be deleted.
+  smoke:
+    name: Smoke test staging
+    needs: staging
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - name: Smoke test
+        run: bun run scripts/smoke.ts "${{ needs.staging.outputs.url }}"
+
+  # 4. Production, only after staging is deployed and verified.
+  #
+  # `environment: production` is also the hook for a manual approval gate: add a
+  # required reviewer to that environment in repo settings and this job waits for
+  # a human before it runs.
+  production:
+    name: Deploy to production
+    needs: smoke
+    if: github.event.inputs.staging_only != 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - run: bun run --cwd apps/web types
+      - run: bun run --cwd apps/web build
+
+      - id: deploy
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: apps/web
+          packageManager: bun
+          command: deploy
+
+      # Same checks against production. Read-only, so it is safe on a live vote.
+      - name: Smoke test production
+        run: bun run scripts/smoke.ts "${{ steps.deploy.outputs.deployment-url }}"
+
+# Deliberately absent: D1 migrations. SQLite cannot drop or retype a column in
+# place, so drizzle-kit emits a full table rebuild — run unattended against a
+# populated votes table, that is unrecoverable. Run `bun run migrate:staging`
+# then `bun run migrate:remote` by hand. The API token is scoped without D1
+# write access so this workflow *cannot* do it by accident.
+#
+# Also absent: VOTE_SALT / COOKIE_SECRET / TURNSTILE_SECRET. Set once with
+# `wrangler secret put` and stored in Cloudflare, not GitHub.

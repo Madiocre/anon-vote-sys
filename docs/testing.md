@@ -63,6 +63,29 @@ Closing the first three means adding `@cloudflare/vitest-pool-workers`, which ru
 workerd with real bindings. Worth doing before the schema changes again; not worth it for the
 request logic already covered here.
 
+## The second phase: smoke tests against a live deployment
+
+`scripts/smoke.ts` covers what the unit tests structurally cannot, by talking to a real deployment:
+
+```bash
+bun run smoke https://anon-vote-sys-staging.<subdomain>.workers.dev
+```
+
+It checks `/api/health`, `/api/candidates` (which proves the D1 binding resolves *and* the table
+exists *and* it was seeded — three separate ways a deploy looks fine and is useless), `/api/results`,
+`/api/status` (which needs `COOKIE_SECRET` to be set), and that both pages render.
+
+It is **read-only** and never casts a vote: a vote from a CI runner would burn a `VoteGate` claim for
+that IP, and those cannot be deleted.
+
+One assertion is a specific regression guard — the ballot must contain **exactly one** Turnstile
+widget. The widget was originally rendered inside each `CandidateCard`, so a twenty-candidate ballot
+shipped twenty challenge widgets. That is invisible to unit tests and to a build, and only obvious
+when you look at the deployed page.
+
+The pipeline runs this against staging before production is reachable at all — see
+[ci-pipeline.md](./ci-pipeline.md).
+
 ## Two constraints that shape the test code
 
 **`mock.module` is process-global.** `bun test` runs every file in one process, and `mock.module`

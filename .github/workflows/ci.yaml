@@ -1,0 +1,97 @@
+name: CI
+
+# Pull requests and non-main branches. Never touches production.
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # The offline gate. Runs for every PR including forks, since it needs no secrets.
+  check:
+    name: Typecheck and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          # Pinned rather than "latest": bun.lock is lockfileVersion 2, written
+          # by Bun 1.4, and --frozen-lockfile turns a resolver mismatch into a
+          # failed build.
+          bun-version: 1.4.0
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      # Required, and not obvious. worker-configuration.d.ts is gitignored, so a
+      # fresh clone has no declarations for D1Database, DurableObjectNamespace,
+      # RateLimit, ExecutionContext or the cloudflare:workers module. Without
+      # this the typecheck fails with 19 "cannot find name/module" errors that
+      # look like broken imports. Reads wrangler.jsonc only — no credentials.
+      - name: Generate Worker types
+        run: bun run --cwd apps/web types
+
+      # typecheck (three workspaces, both tsconfigs) + 87 server tests.
+      - name: Typecheck and test
+        run: bun run check
+
+      # The only gate on .astro files: astro check cannot run against
+      # TypeScript 7, so the build is what catches template and import errors.
+      - name: Build
+        run: bun run --cwd apps/web build
+
+  # Deploy the branch to staging and smoke test it, so a change is seen running
+  # against real bindings before it is merged — not after it reaches production.
+  #
+  # Skipped for forks: pull_request from a fork cannot read repository secrets,
+  # so this would fail with an empty API token rather than a useful error.
+  # Skipped on the shared staging Worker means concurrent PRs overwrite each
+  # other; fine for solo work, revisit if that stops being true.
+  staging:
+    name: Deploy to staging and smoke test
+    needs: check
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Generate Worker types
+        run: bun run --cwd apps/web types
+
+      # CLOUDFLARE_ENV is set by this script. `wrangler deploy --env staging`
+      # does NOT work here — see docs/ci-pipeline.md.
+      - name: Build for staging
+        run: bun run --cwd apps/web build:staging
+
+      - id: deploy
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: apps/web
+          packageManager: bun
+          command: deploy
+
+      - name: Smoke test
+        run: bun run scripts/smoke.ts "${{ steps.deploy.outputs.deployment-url }}"
+
+      - name: Report
+        run: echo "Staging deployment - ${{ steps.deploy.outputs.deployment-url }}" >> "$GITHUB_STEP_SUMMARY"

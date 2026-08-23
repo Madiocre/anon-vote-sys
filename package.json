@@ -9,7 +9,8 @@
   "scripts": {
     "typecheck": "bun run --filter '*' typecheck",
     "test": "bun test",
-    "check": "bun run typecheck && bun run test"
+    "check": "bun run typecheck && bun run test",
+    "smoke": "bun run scripts/smoke.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

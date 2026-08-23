@@ -41,6 +41,25 @@ const errorMessage = errorKey ? (ERRORS[errorKey] ?? ERRORS.server_error) : null
 
 // This page is per-voter. It must never be held in a shared cache.
 Astro.response.headers.set("cache-control", "no-store");
+
+// TURNSTILE: explicit rendering, not implicit — one widget for the whole page.
+//
+// Implicit mode (a bare api.js include) auto-renders every `.cf-turnstile` div
+// and injects the solved token into each one's enclosing form. Neat for a
+// single-form page, wrong here: one form per candidate meant one widget per
+// candidate, i.e. twenty widgets on the live ballot.
+//
+// `render=explicit` on the script URL suppresses that auto-scan so we render
+// exactly one widget into #turnstile-host, and `execution: "execute"` defers
+// the challenge until a vote is actually attempted. That fixes token freshness
+// for free: tokens are single-use and expire, so minting one per click beats
+// solving twenty on page load and hoping they are still valid minutes later.
+//
+// `appearance: "interaction-only"` keeps it invisible and zero-height unless
+// Cloudflare decides a human interaction is genuinely needed.
+//
+// Kept in frontmatter rather than an HTML comment: markup comments in .astro
+// are emitted to the browser, frontmatter comments are stripped.
 ---
 
 <Layout title="Cast your vote" noIndex>
@@ -63,36 +82,41 @@ Astro.response.headers.set("cache-control", "no-store");
     ) : (
       <ul class="grid" role="list">
         {candidates.map((candidate, index) => (
-          <CandidateCard
-            candidate={candidate}
-            sitekey={env.TURNSTILE_SITEKEY}
-            eager={index < 5}
-          />
+          <CandidateCard candidate={candidate} eager={index < 5} />
         ))}
       </ul>
     )
   }
+
+  <div id="turnstile-host" class="turnstile-host" data-sitekey={env.TURNSTILE_SITEKEY}></div>
+
+  <noscript>
+    <p class="notice">
+      Voting needs JavaScript enabled — the anti-robot check cannot run without it.
+    </p>
+  </noscript>
 
   <p class="footer-links">
     <a href={ROUTES.results}>See the current results</a>
   </p>
 </Layout>
 
-<!--
-  Turnstile implicit rendering (AGENTS.md §0): api.js scans the page on load,
-  renders every .cf-turnstile div it finds, and injects the solved token into
-  that div's enclosing form as a hidden `cf-turnstile-response` input. No
-  render() call and no token plumbing on our side — which is precisely why
-  dropping React made this integration simpler rather than harder.
--->
-<script is:inline async defer src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script>
+<script
+  is:inline
+  defer
+  src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTurnstileLoad"
+></script>
 
 <script>
   const forms = Array.from(document.querySelectorAll<HTMLFormElement>("form[data-vote-form]"));
   const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-vote-button]"));
   const notice = document.getElementById("vote-notice");
+  const host = document.getElementById("turnstile-host");
 
   let submitting = false;
+  let widgetId: string | undefined;
+  /** Resolver for the in-flight turnstile.execute(); see mintToken(). */
+  let settle: ((token: string | null) => void) | undefined;
 
   function showError(message: string): void {
     if (!notice) return;
@@ -105,32 +129,79 @@ Astro.response.headers.set("cache-control", "no-store");
     for (const button of buttons) button.disabled = busy;
   }
 
+  function finish(token: string | null): void {
+    settle?.(token);
+    settle = undefined;
+  }
+
+  /**
+   * Called by api.js once it has loaded, because the script URL carries
+   * `?onload=onTurnstileLoad`. Has to be on `window` for that to find it.
+   */
+  window.onTurnstileLoad = () => {
+    if (!host || !window.turnstile) return;
+
+    widgetId = window.turnstile.render(host, {
+      sitekey: host.dataset.sitekey ?? "",
+      // Defer the challenge until a vote is actually attempted, so the token is
+      // always fresh — they are single-use and do expire.
+      execution: "execute",
+      // Stay invisible unless Cloudflare decides a human interaction is needed.
+      appearance: "interaction-only",
+      size: "flexible",
+      callback: (token: string) => finish(token),
+      "error-callback": () => finish(null),
+      "expired-callback": () => finish(null),
+      "timeout-callback": () => finish(null),
+    });
+  };
+
+  /**
+   * Runs the challenge and resolves with a token, or null if it failed. Resets
+   * first so each attempt starts from a clean widget — a spent or expired token
+   * would otherwise be rejected server-side with verification_failed.
+   */
+  function mintToken(): Promise<string | null> {
+    if (!window.turnstile || widgetId === undefined) return Promise.resolve(null);
+
+    return new Promise<string | null>((resolve) => {
+      settle = resolve;
+      try {
+        window.turnstile!.reset(widgetId);
+        window.turnstile!.execute(widgetId);
+      } catch {
+        finish(null);
+      }
+      // Belt and braces: if no callback ever fires, do not leave the button
+      // stuck on "Sending…" forever.
+      setTimeout(() => finish(null), 30_000);
+    });
+  }
+
   for (const form of forms) {
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       if (submitting) return;
 
       const button = form.querySelector<HTMLButtonElement>("[data-vote-button]");
-      const data = new FormData(form);
-      const candidateId = data.get("candidateId");
-      // Injected by Turnstile once the challenge is solved. Absent means the
-      // widget has not finished (or failed to load) — the server would reject
-      // the POST anyway, so say so here instead of spending the round trip.
-      const turnstileToken = data.get("cf-turnstile-response");
-
+      const candidateId = new FormData(form).get("candidateId");
       if (typeof candidateId !== "string") return;
-      if (typeof turnstileToken !== "string" || turnstileToken === "") {
-        showError("The anti-robot check hasn't finished loading yet. Give it a moment.");
-        return;
-      }
 
       submitting = true;
       setBusy(true);
       const label = button?.innerHTML ?? "";
-      if (button) button.textContent = "Sending…";
+      if (button) button.textContent = "Verifying…";
       if (notice) notice.hidden = true;
 
       try {
+        const turnstileToken = await mintToken();
+        if (!turnstileToken) {
+          showError("The anti-robot check didn't pass. Please try again.");
+          return;
+        }
+
+        if (button) button.textContent = "Sending…";
+
         const response = await fetch("/api/vote", {
           method: "POST",
           headers: { "content-type": "application/json", accept: "application/json" },
@@ -151,15 +222,11 @@ Astro.response.headers.set("cache-control", "no-store");
         showError(body?.message ?? "Your vote could not be recorded. Please try again.");
       } catch {
         showError("Network problem — your vote was not recorded. Please try again.");
+      } finally {
+        submitting = false;
+        setBusy(false);
+        if (button) button.innerHTML = label;
       }
-
-      // Turnstile tokens are single-use, so a retry needs a fresh one. Without
-      // this reset the second attempt would always fail verification.
-      window.turnstile?.reset();
-
-      submitting = false;
-      setBusy(false);
-      if (button) button.innerHTML = label;
     });
   }
 </script>

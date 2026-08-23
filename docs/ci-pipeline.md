@@ -1,132 +1,179 @@
-# CI/CD — Cloudflare Workers Builds
+# CI/CD — GitHub Actions
 
-Pushes build, gate, and deploy automatically. This replaces the manual sequence in
-[deployment.md](./deployment.md), which stays as the first-time setup and recovery path.
+Two committed workflows. Push, and they run.
 
-We use **Workers Builds** (Cloudflare's own CI) rather than GitHub Actions. Note these are
-alternative CI systems, not composable — `oven-sh/setup-bun` and friends are GitHub Actions and have
-no meaning here. Workers Builds runs its own Ubuntu 24.04 image with runtimes preinstalled; you pick
-versions with **build variables** instead of setup steps.
+| File | Trigger | What it does |
+| --- | --- | --- |
+| `.github/workflows/ci.yml` | pull requests, pushes to any branch except `main` | Gate, then deploy to staging and smoke test it. Never touches production. |
+| `.github/workflows/deploy.yml` | pushes to `main`, or manual dispatch | Promotion pipeline: gate → staging → smoke → production. |
 
-## The one thing that is genuinely counter-intuitive
+## Production is not directly reachable
 
-**The environment is chosen at build time, not deploy time.**
-
-Normally you select a Wrangler environment with `wrangler deploy --env staging`. That does **not**
-work here. The Astro Cloudflare adapter writes a *flattened* config to `dist/server/wrangler.json`
-during the build and wrangler deploys against that redirected file — which contains no `env` block at
-all. `--env staging` therefore has nothing to select and silently deploys **production bindings**.
-
-Verified: building normally and running `wrangler deploy --env staging --dry-run` reports
-`env.DB (anon-vote-sys)` and `RESULTS_TTL_SECONDS ("600")` — production, despite the flag.
-
-The environment is selected by setting `CLOUDFLARE_ENV` before the build, which is what
-`bun run deploy:staging` does:
+`deploy.yml` is four jobs chained with `needs`:
 
 ```
-CLOUDFLARE_ENV=staging astro build && wrangler deploy
+check  ->  staging  ->  smoke  ->  production
 ```
 
-With that, the generated config comes out as `anon-vote-sys-staging` / `anon-vote-sys-staging` D1 /
-TTL 60 / rate-limit namespace 1002, and a plain `wrangler deploy` does the right thing. Adding
-`--env staging` on top is harmless but redundant.
+Every arrow is a hard dependency, so **there is no path that deploys to production without deploying
+to staging and smoke-testing it first.** That is the point: `bun run deploy` straight to production is
+an easy habit precisely because it is one line, so the pipeline removes the shortcut rather than
+relying on remembering.
 
-## Dashboard settings
+If you want a human checkpoint too, the `production` job declares `environment: production` — add a
+required reviewer to that environment in repo settings and the job waits for approval before running.
 
-Workers Builds → connect the repo to the **`anon-vote-sys`** Worker, then Settings → Build.
+`workflow_dispatch` takes a `staging_only` flag for deploying to staging without promoting.
 
-| Setting | Value |
+## The two testing phases
+
+**Phase one, offline:** `bun run check` — typecheck plus 87 unit tests, every binding stubbed. Fast,
+runs on forks, catches logic and type regressions.
+
+**Phase two, against a live deployment:** `scripts/smoke.ts`, run against the staging URL that
+`wrangler-action` reports as `deployment-url`.
+
+Phase one cannot catch a whole class of failure by construction, because it stubs the bindings: a
+missing D1 binding, an unmigrated database, an unset secret, a Worker that fails to boot, an
+`imageUrl` that is not a resolvable URL. Phase two hits all of those, since it talks to a real
+deployment with real bindings.
+
+It is **read-only** on purpose — it never casts a vote. A vote from the runner would burn a
+`VoteGate` claim for the runner's IP, and those cannot be deleted.
+
+It also asserts there is **exactly one** Turnstile widget on the ballot, which is a regression guard
+for a real bug: the widget was originally rendered per candidate card, so a twenty-candidate ballot
+shipped twenty challenge widgets.
+
+Run it by hand against anything:
+
+```bash
+bun run smoke https://anon-vote-sys-staging.<subdomain>.workers.dev
+```
+
+## Why Actions rather than Cloudflare's own Workers Builds
+
+Workers Builds works, and needs no API token. But its entire configuration — build command, deploy
+command, build variables, watch paths — lives in the **Cloudflare dashboard**, not in the repository.
+There is no file to commit. That is not a convention you can opt out of: there is [no API for
+enabling the Git integration](https://github.com/cloudflare/workers-sdk/issues/12058), and the
+[Terraform provider cannot do it either](https://github.com/cloudflare/terraform-provider-cloudflare/issues/6924)
+— it must be clicked through by hand.
+
+So the pipeline could not be version-controlled, reviewed in a PR, or rebuilt from the repo. For a
+project where the deploy gate is the only thing standing between a bad commit and a live vote, having
+that gate be unversioned dashboard state is the wrong trade. Everything here is in git instead.
+
+Workers Builds also has an account-wide limit of **1 concurrent build** on the free plan (6 on paid),
+shared across every Worker. GitHub-hosted runners give 20 concurrent jobs on the free tier.
+
+## One-time setup
+
+**1. Create the two repository secrets.** Settings → Secrets and variables → Actions:
+
+| Secret | Where to get it |
 | --- | --- |
-| Root directory | `apps/web` |
-| Build command | see below |
-| Deploy command | `bunx wrangler deploy` |
-| Non-production branch deploy command | `bunx wrangler versions upload` |
-| Build variables | `BUN_VERSION=1.4.0`, `SKIP_DEPENDENCY_INSTALL=1` |
-| Build watch paths — include | `apps/*`, `packages/*` |
-| Branch control | production `main`; non-production branch builds **enabled** |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare dashboard → My Profile → API Tokens → Create Token |
+| `CLOUDFLARE_ACCOUNT_ID` | Workers & Pages overview, right-hand sidebar |
 
-The dashboard Worker name must match `name` in the `wrangler.jsonc` under the root directory, or the
-build fails before it starts.
+**2. Scope the API token.** Use a custom token with:
 
-### Build command
+| Permission | Why |
+| --- | --- |
+| Account → Workers Scripts → Edit | Publishing the Worker |
+| Account → Workers KV Storage → Edit | The Astro adapter auto-provisions the `SESSION` KV namespace on deploy |
+| Account → Account Settings → Read | Account lookups during deploy |
+
+**Not** D1 Edit — migrations are deliberately not run from CI (see below), so the token does not need
+write access to the vote database. That is the point of leaving them out.
+
+**3. Create the D1 databases by hand**, before the first deploy. CI will not create them, and
+`database_id` in `wrangler.jsonc` must already be real:
+
+```bash
+wrangler d1 create anon-vote-sys
+```
+
+> **Blocker: the staging database does not exist yet.** `env.staging.d1_databases[0].database_id` in
+> `apps/web/wrangler.jsonc` is still the literal placeholder `TODO-CREATE-STAGING-D1`. Because every
+> path to production now runs through staging, **the entire pipeline fails until this is done**:
+>
+> ```bash
+> wrangler d1 create anon-vote-sys-staging
+> ```
+>
+> Paste the returned id into that field, then migrate and seed it:
+>
+> ```bash
+> cd packages/db && bun run migrate:staging && bun run seed:staging
+> ```
+>
+> Staging also needs its own three secrets — they do not inherit from production:
+> `wrangler secret put VOTE_SALT --env staging`, and likewise `COOKIE_SECRET` and
+> `TURNSTILE_SECRET` (use the always-passes test secret for staging).
+
+**4. Set the three secrets on the Worker**, after the first successful deploy has created it:
+
+```bash
+cd apps/web && bun x wrangler secret put VOTE_SALT
+```
+
+…and `COOKIE_SECRET`, `TURNSTILE_SECRET`. These are Cloudflare secrets, not GitHub secrets — see
+[deployment.md](./deployment.md).
+
+That is the whole setup. From then on, pushing to `main` deploys.
+
+## The steps, and the two that are not obvious
+
+Both workflows run the same chain:
 
 ```
-cd ../.. && bun install --frozen-lockfile && bun run --cwd apps/web types && bun run check && bun run --cwd apps/web build
+bun install --frozen-lockfile
+bun run --cwd apps/web types
+bun run check
+bun run --cwd apps/web build
 ```
 
-`bun run check` is `typecheck && test` — both gates in one script, so the dashboard setting does not
-have to change when the gate does.
+**`bun run --cwd apps/web types` is required.** `worker-configuration.d.ts` is gitignored, so a fresh
+clone has no declarations for `D1Database`, `DurableObjectNamespace`, `RateLimit`, `ExecutionContext`
+or the `cloudflare:workers` module. Without it the typecheck fails with 19 "cannot find name/module"
+errors that read like broken imports rather than missing codegen. Verified by deleting the file: 19
+errors without, 0 with. It reads `wrangler.jsonc` only and needs no credentials, so it runs before
+any secret is in play.
 
-Three parts of that are load-bearing and not obvious:
+**The environment is chosen at build time, not deploy time.** The Astro adapter flattens
+`wrangler.jsonc` into `dist/server/wrangler.json` during the build, and that generated file has no
+`env` block. So `wrangler deploy --env staging` finds nothing to select and silently ships
+**production** bindings. Verified: with a normal build, `wrangler deploy --env staging --dry-run`
+reports `env.DB (anon-vote-sys)` and `RESULTS_TTL_SECONDS ("600")` despite the flag.
 
-- **`cd ../..`** — the root directory is `apps/web`, but this is a Bun *workspace* monorepo.
-  `bun.lock` and the `workspaces` array live at the repo root, and `@avs/db` / `@avs/shared` resolve
-  through `workspace:*`. An install run inside `apps/web` cannot link them.
-- **`SKIP_DEPENDENCY_INSTALL=1`** — follows from the above. Cloudflare's automatic install would run
-  in the wrong directory, so we turn it off and let the build command own installation.
-- **`bun run --cwd apps/web types`** — regenerates `worker-configuration.d.ts`, which is gitignored
-  and therefore absent from a fresh clone. Without it the typecheck fails with **19** "cannot find
-  name / cannot find module" errors that look like broken imports rather than missing codegen.
-  (Verified by deleting the file: 19 errors without it, 0 with.) It reads `wrangler.jsonc` only and
-  needs no credentials, so it is safe this early.
+`build:staging` sets `CLOUDFLARE_ENV=staging`, which is what actually resolves the environment. After
+that a plain `wrangler deploy` is correct — which is why the deploy step passes `command: deploy` in
+both cases and the *build* step is the one that branches.
 
-Any non-zero exit in that chain fails the build and the deploy command never runs. That is the gate.
+## Deploying to staging
 
-### Why `BUN_VERSION` is mandatory
+Actions tab → Deploy → Run workflow → target `staging`. It builds with `CLOUDFLARE_ENV=staging` and
+deploys to the `anon-vote-sys-staging` Worker, which has its own D1, its own Durable Object
+namespaces and its own rate limiter — so a test vote there cannot reach the live tally.
 
-The build image defaults to **Bun 1.2.15**. Our `bun.lock` is `lockfileVersion: 2`, written by Bun
-1.4 — an older Bun will not read it cleanly, and `--frozen-lockfile` turns that into a failed build
-rather than a silent re-resolve. Pin `1.4.0` to match local.
+## The gate
 
-## Staging vs production
+`bun run check` is `typecheck && test`: three workspaces typechecked across both tsconfigs, plus 87
+server tests. Then `build`, which is the only thing that checks `.astro` files at all — `astro check`
+cannot run against TypeScript 7.
 
-Production and staging are **separate Workers** — a named environment deploys as
-`<name>-<env>`, so `anon-vote-sys-staging` has its own D1, its own Durable Object namespaces, and its
-own rate limiter.
+See [testing.md](./testing.md) for what the tests cover and, more importantly, what they do not:
+real D1 SQL, Durable Object persistence and the Workers Cache API are stubbed, because they only
+exist inside workerd.
 
-This is not fussiness. A version/preview build uses the Worker's **top-level bindings**, so a preview
-URL on the production Worker talks to the production D1. On a voting app that means a test vote lands
-in the live tally *and* burns a `VoteGate` claim, which cannot be deleted. Staging exists so that
-cannot happen.
+## Migrations are deliberately not automated
 
-Because the adapter bakes the environment in at build time, deploying staging from CI means changing
-the **build** command, not the deploy command. Two ways to wire it:
+Never add `wrangler d1 migrations apply --remote` to the deploy workflow. SQLite cannot drop or
+retype a column in place, so drizzle-kit emits a full table rebuild for those changes. Run unattended
+against a populated `votes` table, that is unrecoverable.
 
-**Option A — production only from CI (simplest).** Leave non-production branch builds off, or leave
-the non-production deploy command as `bunx wrangler versions upload`, understanding that such a
-preview runs against production bindings and must not be voted on. Deploy staging by hand with
-`bun run deploy:staging`.
-
-**Option B — a second Workers Builds connection.** Connect the repo again, this time to the
-`anon-vote-sys-staging` Worker, with root directory `apps/web`, the same build variables plus
-`CLOUDFLARE_ENV=staging`, and branch control set so it builds the branches production ignores. Each
-Worker then has its own build project and they never collide.
-
-Option B is the real answer if you want branch pushes to land somewhere safe automatically. Start
-with A, move to B when branch previews start mattering.
-
-## The test gate
-
-`bun test` runs **87 tests** covering the whole server surface — see
-[testing.md](./testing.md) for what is covered, how the bindings are faked, and the two
-constraints that shape it (`mock.module` is process-global, and the results cache is module-level).
-
-They run in plain Bun rather than workerd, which works because nothing in `src/server` imports a
-Durable Object class at runtime — `env.ts` pulls them in with `import type`, which is erased.
-
-What that deliberately does **not** cover: real D1 SQL, real Durable Object storage and persistence,
-and the Workers Cache API. Those only exist inside workerd; covering them needs
-`@cloudflare/vitest-pool-workers`. So the suite proves the request logic is right, not that the SQL
-is. Keep the post-deploy checks in [deployment.md](./deployment.md) for that.
-
-## Migrations stay manual
-
-Do **not** put `wrangler d1 migrations apply --remote` in the deploy command. This matters more now
-that deploys are automatic: SQLite cannot drop or retype a column in place, so drizzle-kit emits a
-full table rebuild for those changes. Run unattended against a populated `votes` table, that is
-unrecoverable.
-
-Run migrations by hand, staging first:
+Run them by hand, staging first:
 
 ```bash
 cd packages/db && bun run migrate:staging
@@ -136,15 +183,13 @@ cd packages/db && bun run migrate:staging
 cd packages/db && bun run migrate:remote
 ```
 
-## Limits
+The API token is scoped without D1 write access specifically so CI *cannot* do this by accident.
 
-Free plan: 3,000 build minutes/month, 1 concurrent build, 20-minute timeout, 2 vCPU / 8 GB RAM /
-20 GB disk. This build runs in well under a minute, so the cap is not a practical concern. Paid is
-6,000 minutes and 6 concurrent builds.
+## App secrets stay out of GitHub
 
-## What you give up versus GitHub Actions
+`VOTE_SALT`, `COOKIE_SECRET` and `TURNSTILE_SECRET` are set once with `wrangler secret put` and live
+in Cloudflare. `wrangler-action` has a `secrets` input that would push them on every deploy, but
+using it means a second copy of your cookie-signing key and IP-hash salt sitting in GitHub — for no
+gain, since they do not change between deploys.
 
-Worth knowing before you hit it: no PR-only checks that gate without deploying, no matrix builds, no
-steps *after* deploy (smoke tests, notifications), and the build log is the only artifact. If any of
-those become necessary, Actions is the better tool — but for build-gate-deploy, this is far less
-machinery to maintain.
+`TURNSTILE_SITEKEY` is public and already committed in `wrangler.jsonc`. It is not a secret.

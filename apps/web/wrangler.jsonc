@@ -7,7 +7,9 @@
 	// this. src/worker.ts re-exports both DO classes and the Astro fetch handler.
 	"main": "src/worker.ts",
 	"compatibility_date": "2026-08-22",
-	"compatibility_flags": ["global_fetch_strictly_public"],
+	"compatibility_flags": [
+		"global_fetch_strictly_public"
+	],
 	"assets": {
 		"directory": "./dist",
 		"binding": "ASSETS"
@@ -20,7 +22,7 @@
 		// Turnstile's PUBLIC sitekey. Rendered into the ballot markup, so it is a
 		// var and not a secret. This is Cloudflare's always-passes test key —
 		// swap for the real one before deploying.
-		"TURNSTILE_SITEKEY": "1x00000000000000000000AA"
+		"TURNSTILE_SITEKEY": "0x4AAAAAAEZfpkvaLzTofGOv"
 	},
 	"d1_databases": [
 		{
@@ -35,20 +37,37 @@
 			// migrations_dir.
 			"migrations_dir": "../../packages/db/migrations",
 			"migrations_pattern": "../../packages/db/migrations/*/migration.sql"
+		},
+		{
+			"binding": "anon_vote_sys_staging",
+			"database_name": "anon-vote-sys-staging",
+			"database_id": "323fea69-5b44-4928-b663-af3022c27631"
 		}
 	],
 	// What the code actually calls: env.VOTE_GATE / env.RATE_LIMITER.
 	"durable_objects": {
 		"bindings": [
-			{ "name": "VOTE_GATE", "class_name": "VoteGate" },
-			{ "name": "RATE_LIMITER", "class_name": "RateLimiter" }
+			{
+				"name": "VOTE_GATE",
+				"class_name": "VoteGate"
+			},
+			{
+				"name": "RATE_LIMITER",
+				"class_name": "RateLimiter"
+			}
 		]
 	},
 	// DO lifecycle declaration. Mutually exclusive with the legacy `migrations`
 	// array — never write both.
 	"exports": {
-		"VoteGate": { "type": "durable-object", "storage": "sqlite" },
-		"RateLimiter": { "type": "durable-object", "storage": "sqlite" }
+		"VoteGate": {
+			"type": "durable-object",
+			"storage": "sqlite"
+		},
+		"RateLimiter": {
+			"type": "durable-object",
+			"storage": "sqlite"
+		}
 	},
 	// Rate limiting layer 1: native binding, scoped per Cloudflare
 	// location. Absorbs bursts at the edge before a DO round trip is paid for.
@@ -57,10 +76,12 @@
 		{
 			"name": "EDGE_RATE_LIMITER",
 			"namespace_id": "1001",
-			"simple": { "limit": 20, "period": 60 }
+			"simple": {
+				"limit": 20,
+				"period": 60
+			}
 		}
 	],
-
 	// Staging. Deploys as a SEPARATE Worker named `anon-vote-sys-staging`, which
 	// is the entire point: a named environment gets its own Durable Object
 	// namespaces and its own D1, so a test vote can never touch the live tally.
@@ -100,8 +121,14 @@
 			],
 			"durable_objects": {
 				"bindings": [
-					{ "name": "VOTE_GATE", "class_name": "VoteGate" },
-					{ "name": "RATE_LIMITER", "class_name": "RateLimiter" }
+					{
+						"name": "VOTE_GATE",
+						"class_name": "VoteGate"
+					},
+					{
+						"name": "RATE_LIMITER",
+						"class_name": "RateLimiter"
+					}
 				]
 			},
 			"ratelimits": [
@@ -111,7 +138,10 @@
 					// unique per ACCOUNT, not per Worker, so reusing it would make
 					// staging traffic count against production's limit.
 					"namespace_id": "1002",
-					"simple": { "limit": 20, "period": 60 }
+					"simple": {
+						"limit": 20,
+						"period": 60
+					}
 				}
 			]
 		}

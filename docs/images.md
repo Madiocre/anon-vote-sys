@@ -78,11 +78,16 @@ curl -I "https://cdn.jsdelivr.net/gh/madiocre/anon-vote-assets@v1/candidates/can
 jsDelivr's edge worldwide. A **404 almost always means the repo is private**, the tag was not pushed,
 or the path is wrong. There is no error message distinguishing those, so check in that order.
 
-**6. Put the URLs in the seed.** Edit `packages/db/seed/candidates.json`, replacing every
-`placehold.co` URL:
+**6. Point the seed at it.** The base URL lives once in `packages/db/seed/seed.ts`:
+
+```ts
+const IMAGE_BASE_URL = "https://cdn.jsdelivr.net/gh/Madiocre/vote-images/";
+```
+
+and `candidates.json` holds only the filename, which `seed.ts` appends:
 
 ```json
-{ "id": "candidate-01", "name": "Real Name", "imageUrl": "https://cdn.jsdelivr.net/gh/madiocre/anon-vote-assets@v1/candidates/candidate-01.webp", "sortOrder": 1 }
+{ "id": "candidate-01", "name": "Real Name", "imageUrl": "candidate-01.svg", "sortOrder": 1 }
 ```
 
 **7. Apply it.**
@@ -177,21 +182,66 @@ Two constraints that do apply:
    https://cdn.jsdelivr.net/gh/<user>/anon-vote-assets@v1/candidates/candidate-01.webp
    ```
 
-## Always pin a tag or SHA, never a branch
+## What a "tag" is, and why jsDelivr cares
 
-This is the one rule that bites people.
+Worth being explicit, because "add a tag" sounds like something you do to the *repo* — it is not. The
+repo is already fine. A tag is about **which commit** a URL points at.
 
-| URL form | Cache behaviour |
-| --- | --- |
-| `@v1` (tag) | Cached ~1 year, stored permanently. |
-| `@a1b2c3d` (commit SHA) | Same — permanent. |
-| `@main` (branch) | Cached **12 hours**. |
-| `@latest`, or no `@ref` at all | Resolved dynamically; documented cases of it disagreeing with the explicit-ref URL for the same file. Avoid. |
+A **git tag** is just a permanent name for one specific commit. Branches move: `main` today is a
+different commit from `main` last week, because every push advances it. A tag does not — `v1` means
+the exact commit you created it on, forever. It is the usual way to mark releases:
 
-A branch URL is worse in both directions at once: it re-fetches from GitHub far more often, *and*
-after you replace a photo the old one keeps being served for up to twelve hours with no way to purge
-it. A tag is immutable, so there is never a stale-versus-fresh question — you publish a change by
-pointing at a new tag.
+```bash
+git tag v1          # names the current commit "v1"
+git push --tags     # publishes that name to GitHub
+```
+
+Nothing else about the repo changes. No release, no branch, no settings. It is a label.
+
+This matters here because of the part of a jsDelivr URL after the `@`:
+
+```
+https://cdn.jsdelivr.net/gh/<user>/<repo>@<THIS BIT>/<path>
+```
+
+That is jsDelivr asking *"which version of this file?"* — and it decides how long to cache based on
+whether the answer can ever change:
+
+| URL form | What it means | Cache behaviour |
+| --- | --- | --- |
+| `@v1` (tag) | One exact commit, permanently | Cached ~1 year, stored permanently |
+| `@a1b2c3d` (commit SHA) | Same, by hash | Same — permanent |
+| `@main` (branch) | "whatever is newest" — can change | Cached **12 hours** |
+| no `@` at all | Default branch HEAD — same as above | Cached **12 hours** |
+
+Because a tag can never point somewhere else, jsDelivr can cache it essentially forever and never be
+wrong. A branch might change at any moment, so it has to re-check every 12 hours — and in between, it
+serves whatever it last saw.
+
+### What this means for your current setup
+
+Your base URL has no `@` at all:
+
+```
+https://cdn.jsdelivr.net/gh/Madiocre/vote-images/
+```
+
+Checking what jsDelivr returns for it confirms the branch behaviour:
+
+```
+x-jsd-version: HEAD
+x-jsd-version-type: branch
+cache-control: public, max-age=604800, s-maxage=43200
+```
+
+`s-maxage=43200` is 12 hours. **This works, and there is nothing to fix while the images are not
+changing.** The consequence only appears when you replace a photo: for up to 12 hours afterwards,
+some visitors keep seeing the old one, and there is no reliable way to flush it (see the purge
+section below). Different people in different regions may see different images during that window.
+
+If image swaps ever become routine, the fix is to tag the assets repo and add `@v1` to
+`IMAGE_BASE_URL` in `packages/db/seed/seed.ts`, bumping to `@v2` when you re-tag. Until then this is
+a known trade, not a bug.
 
 ### Corollary: never move or reuse a tag
 
@@ -214,21 +264,34 @@ There is a purge endpoint, and it does not rescue this:
 It exists for `@latest` and branch URLs. Tag-per-change sidesteps the whole mechanism, which is why
 that is the rule here rather than a preference.
 
+## How the URLs are assembled
+
+`candidates.json` stores **bare filenames**, not full URLs:
+
+```json
+{ "id": "candidate-01", "name": "Candidate 01", "imageUrl": "candidate-01.svg", "sortOrder": 1 }
+```
+
+`seed.ts` prepends a single base constant when it generates the SQL:
+
+```ts
+const IMAGE_BASE_URL = "https://cdn.jsdelivr.net/gh/Madiocre/vote-images/";
+```
+
+The full URL is what lands in `candidates.image_url`, so nothing downstream changes — but moving the
+CDN, the repo, or the tag is a one-line edit rather than a find-and-replace across every entry.
+
 ## Changing a photo
 
-```bash
-# in the assets repo
-git add candidates/candidate-03.webp && git commit -m "New photo for candidate 3"
-git tag v2 && git push --tags
-```
-
-Then bump the tag in `packages/db/seed/candidates.json` (`@v1` → `@v2`) and re-seed:
+Commit the replacement to the assets repo and re-seed:
 
 ```bash
-cd packages/db && bun run seed:remote
+cd packages/db && bun run seed:staging && bun run seed:remote
 ```
 
-No deploy needed — the ballot reads candidates from D1, and the cached copy expires within
+Strictly, re-seeding is only needed if the *filename* changed — the URL in D1 is otherwise identical,
+and jsDelivr will pick up the new bytes on its own once the 12-hour branch cache expires (see above).
+No deploy either way: the ballot reads candidates from D1, and that cached copy expires within
 `RESULTS_TTL_SECONDS` (600s).
 
 ## Preparing the files

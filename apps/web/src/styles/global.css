@@ -267,36 +267,29 @@ button {
   white-space: nowrap;
 }
 
-/*
- * Turnstile renders its own fixed-size iframe (300x65 at the default size) into
- * the .cf-turnstile div. The card grid can be narrower than that on small
- * phones, so the widget is scaled down from its top-left rather than allowed to
- * overflow the card. transform is used instead of width because the iframe's
- * internal layout is not ours to reflow.
- */
 .vote-form {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
   margin-top: auto;
 }
 
-.cf-turnstile {
-  min-height: 65px;
+/*
+ * The single Turnstile widget for the page, rendered explicitly into this host
+ * (see index.astro). There is deliberately no min-height: with
+ * appearance="interaction-only" the widget stays empty and zero-height for
+ * almost every voter, and reserving 65px for something that will never draw
+ * would leave a permanent gap above the footer links.
+ *
+ * When it DOES appear — Cloudflare decided a human interaction is needed — it
+ * is centred and separated from the grid, rather than crammed into a card.
+ */
+.turnstile-host {
+  display: flex;
+  justify-content: center;
 }
 
-@media (max-width: 360px) {
-  .cf-turnstile {
-    transform: scale(0.85);
-    transform-origin: left top;
-    min-height: 56px;
-  }
-}
-
-/* Turnstile injects nothing when JS is off, so this explains the dead widget. */
-.vote-form noscript {
-  color: var(--text-muted);
-  font-size: 0.8rem;
+.turnstile-host:not(:empty) {
+  margin-top: var(--space-6);
 }
 
 @media (prefers-reduced-motion: reduce) {

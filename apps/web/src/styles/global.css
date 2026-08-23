@@ -1,0 +1,311 @@
+:root {
+  --bg: #f6f5f3;
+  --bg-raised: #ffffff;
+  --border: #e2ded8;
+  --border-strong: #cdc7bf;
+  --text: #1c1a17;
+  --text-muted: #6c655c;
+  --accent: #b4531f;
+  --accent-text: #ffffff;
+  --accent-soft: #f6e5d9;
+  --ring: rgba(180, 83, 31, 0.35);
+  --shadow: 0 1px 2px rgba(28, 26, 23, 0.05), 0 8px 24px rgba(28, 26, 23, 0.06);
+  --shadow-lift: 0 2px 4px rgba(28, 26, 23, 0.07), 0 16px 40px rgba(28, 26, 23, 0.1);
+
+  --radius: 14px;
+  --radius-sm: 9px;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-8: 3rem;
+  --space-10: 4.5rem;
+
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, "Noto Sans", sans-serif;
+  --font-num: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161513;
+    --bg-raised: #201e1b;
+    --border: #322f2b;
+    --border-strong: #46423c;
+    --text: #f1eee9;
+    --text-muted: #a29a8f;
+    --accent: #e8863f;
+    --accent-text: #1c1409;
+    --accent-soft: #33241a;
+    --ring: rgba(232, 134, 63, 0.4);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
+    --shadow-lift: 0 2px 4px rgba(0, 0, 0, 0.45), 0 16px 40px rgba(0, 0, 0, 0.45);
+
+    color-scheme: dark;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+}
+
+a {
+  color: var(--accent);
+  text-underline-offset: 3px;
+}
+
+button {
+  font: inherit;
+}
+
+:where(a, button, [tabindex]):focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.shell {
+  width: min(100% - 2rem, 1600px);
+  margin-inline: auto;
+  padding-block: var(--space-8) var(--space-10);
+}
+
+.page-header {
+  text-align: center;
+  max-width: 62ch;
+  margin: 0 auto var(--space-8);
+}
+
+.page-header h1 {
+  margin: 0 0 var(--space-3);
+  font-size: clamp(1.75rem, 1.2rem + 2.4vw, 3rem);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  font-weight: 680;
+  text-wrap: balance;
+}
+
+.page-header p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: clamp(0.95rem, 0.9rem + 0.3vw, 1.1rem);
+  text-wrap: pretty;
+}
+
+/* The voting/results grid: 1 column on phones, stepping up to 5 on wide screens. */
+.grid {
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 480px) {
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 768px) {
+  .grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1100px) {
+  .grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1440px) {
+  .grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.card__media {
+  aspect-ratio: 1 / 1;
+  background: var(--accent-soft);
+  overflow: hidden;
+}
+
+.card__media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  flex: 1;
+}
+
+.card__name {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+  text-wrap: balance;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  width: 100%;
+  margin-top: auto;
+  padding: 0.7rem 1rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: transform 120ms ease, filter 120ms ease, opacity 120ms ease;
+}
+
+.btn:hover:not(:disabled) {
+  filter: brightness(1.07);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.btn--inline {
+  width: auto;
+  margin-top: 0;
+}
+
+.notice {
+  max-width: 62ch;
+  margin: 0 auto var(--space-6);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-strong);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.notice[hidden] {
+  display: none;
+}
+
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  justify-content: center;
+  margin-top: var(--space-8);
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/*
+ * Turnstile renders its own fixed-size iframe (300x65 at the default size) into
+ * the .cf-turnstile div. The card grid can be narrower than that on small
+ * phones, so the widget is scaled down from its top-left rather than allowed to
+ * overflow the card. transform is used instead of width because the iframe's
+ * internal layout is not ours to reflow.
+ */
+.vote-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: auto;
+}
+
+.cf-turnstile {
+  min-height: 65px;
+}
+
+@media (max-width: 360px) {
+  .cf-turnstile {
+    transform: scale(0.85);
+    transform-origin: left top;
+    min-height: 56px;
+  }
+}
+
+/* Turnstile injects nothing when JS is off, so this explains the dead widget. */
+.vote-form noscript {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

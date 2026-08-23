@@ -12,7 +12,7 @@ export interface RateLimitOptions {
 type Bindings = { Bindings: Env };
 
 /**
- * Two layers, cheapest first (AGENTS.md §5):
+ * Two layers, cheapest first:
  *  1. EDGE_RATE_LIMITER — the native binding, scoped per Cloudflare location.
  *     Absorbs an obvious burst hitting one colo without ever reaching a DO.
  *  2. RATE_LIMITER DO — the authoritative, globally-consistent check. Only

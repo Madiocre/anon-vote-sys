@@ -1,0 +1,30 @@
+---
+import "../styles/global.css";
+
+interface Props {
+  title: string;
+  description?: string;
+  /** Voting and thank-you pages must never be cached; results deliberately are. */
+  noIndex?: boolean;
+}
+
+const { title, description = "An anonymous, one-vote-per-person public poll.", noIndex = false } =
+  Astro.props;
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta name="color-scheme" content="light dark" />
+    {noIndex && <meta name="robots" content="noindex" />}
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <main class="shell">
+      <slot />
+    </main>
+  </body>
+</html>

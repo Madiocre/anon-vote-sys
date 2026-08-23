@@ -14,11 +14,10 @@ export interface RateLimitResult {
 /**
  * Fixed-window counter, one instance per (identity, route) key — built by
  * middleware/rate-limit.ts. This is the authoritative, globally-consistent
- * layer: unlike the native EDGE_RATE_LIMITER binding (scoped per Cloudflare
- * location — see AGENTS.md §5), a DO instance is pinned to one location and
- * single-threaded, so it's the actual single source of truth for the count,
+ * layer: unlike the native EDGE_RATE_LIMITER binding,
+ * a DO instance is pinned to one location and single-threaded, 
+ * so it's the actual single source of truth for the count,
  * not an approximation of it.
- *
  * limit/windowMs are passed in per call rather than hardcoded, so one class
  * serves every route at whatever limit that route's middleware config asks
  * for — /api/vote and /api/status don't need separate DO classes just because

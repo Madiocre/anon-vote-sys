@@ -6,10 +6,8 @@
       "name": "anon-vote-sys",
       "devDependencies": {
         "@types/bun": "latest",
-        "wrangler": "^4.125.0",
-      },
-      "peerDependencies": {
         "typescript": "^7",
+        "wrangler": "^4.125.0",
       },
     },
     "apps/web": {
@@ -30,10 +28,10 @@
       "dependencies": {
         "@avs/shared": "workspace:*",
         "@types/bun": "^1.4.0",
-        "drizzle-orm": "^1.0.0-rc.4",
+        "drizzle-orm": "1.0.0-rc.4",
       },
       "devDependencies": {
-        "drizzle-kit": "^1.0.0-rc.4",
+        "drizzle-kit": "1.0.0-rc.5-ab785fc",
       },
     },
     "packages/shared": {

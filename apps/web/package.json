@@ -1,7 +1,14 @@
 {
   "name": "@avs/web",
-  "type": "module",
   "version": "0.3.0",
+  "dependencies": {
+    "@astrojs/cloudflare": "^14.2.3",
+    "astro": "^7.2.4",
+    "hono": "^4.13.3",
+    "wrangler": "^4.125.0",
+    "@avs/shared": "workspace:*",
+    "@avs/db": "workspace:*"
+  },
   "engines": {
     "node": ">=22.12.0"
   },
@@ -11,14 +18,10 @@
     "preview": "astro preview",
     "astro": "astro",
     "typecheck": "tsc --noEmit",
-    "generate-types": "wrangler types"
+    "types": "wrangler types",
+    "build:staging": "CLOUDFLARE_ENV=staging astro build",
+    "deploy": "astro build && wrangler deploy",
+    "deploy:staging": "CLOUDFLARE_ENV=staging astro build && wrangler deploy"
   },
-  "dependencies": {
-    "@astrojs/cloudflare": "^14.2.3",
-    "astro": "^7.2.4",
-    "hono": "^4.13.3",
-    "wrangler": "^4.125.0",
-    "@avs/shared": "workspace:*",
-    "@avs/db": "workspace:*"
-  }
+  "type": "module"
 }

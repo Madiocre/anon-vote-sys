@@ -1,0 +1,381 @@
+---
+import { getCachedResults } from "../server/lib/cache.ts";
+import { ROUTES } from "@avs/shared";
+
+import Layout from "../layouts/Layout.astro";
+import { cfContext, env } from "../lib/runtime.ts";
+
+export const prerender = false;
+
+const { value: results, hit } = await getCachedResults(env, cfContext(Astro.locals));
+
+// What actually keeps D1 quiet is getCachedResults above: this render is served
+// from the Cache API, so a burst of visitors costs one D1 read per edge location
+// per TTL rather than one per visitor. Cloudflare does not automatically store a
+// Worker's own response, so the header below is for browsers and any intermediary
+// proxy — `max-age=0` makes them revalidate instead of sitting on a stale copy.
+Astro.response.headers.set("cache-control", `public, max-age=0, s-maxage=${results.ttlSeconds}`);
+Astro.response.headers.set("x-cache", hit ? "HIT" : "MISS");
+
+const leader = results.candidates[0];
+const hasVotes = results.totalVotes > 0;
+---
+
+<Layout title="Live results" description="Current standings in the public vote.">
+  <header class="page-header">
+    <h1>Current results</h1>
+    <p>
+      {
+        hasVotes
+          ? `${results.totalVotes.toLocaleString("en-US")} ${results.totalVotes === 1 ? "vote" : "votes"} counted so far.`
+          : "No votes have been counted yet. Be the first."
+      }
+    </p>
+  </header>
+
+  <div class="meta" role="status">
+    <span>
+      Updated <span id="updated-ago">just now</span>
+    </span>
+    <span class="meta__dot" aria-hidden="true">·</span>
+    <span>
+      Next refresh <span id="next-update">in {Math.round(results.ttlSeconds / 60)} min</span>
+    </span>
+  </div>
+
+  {
+    results.candidates.length === 0 ? (
+      <p class="notice">There are no candidates on the ballot yet.</p>
+    ) : (
+      <ol
+        class="board"
+        id="board"
+        data-ttl={results.ttlSeconds}
+        data-generated-at={results.generatedAt}
+        data-stale-at={results.staleAt}
+        data-total={results.totalVotes}
+      >
+        {results.candidates.map((candidate, index) => (
+          <li
+            class="row"
+            data-id={candidate.id}
+            style={`order:${index}`}
+            data-leader={hasVotes && candidate.id === leader?.id ? "true" : undefined}
+          >
+            <span class="row__rank" data-rank>
+              {index + 1}
+            </span>
+
+            <span class="row__thumb">
+              <img
+                src={candidate.imageUrl}
+                alt=""
+                width="200"
+                height="200"
+                loading={index < 6 ? "eager" : "lazy"}
+                decoding="async"
+              />
+            </span>
+
+            <span class="row__main">
+              <span class="row__name">{candidate.name}</span>
+              <span class="row__track">
+                <span class="row__fill" data-fill style={`width:${candidate.percentage}%`} />
+              </span>
+            </span>
+
+            <span class="row__stats">
+              <b class="row__votes" data-votes>
+                {candidate.votes.toLocaleString("en-US")}
+              </b>
+              <small class="row__pct" data-pct>
+                {candidate.percentage.toFixed(1)}%
+              </small>
+            </span>
+          </li>
+        ))}
+      </ol>
+    )
+  }
+
+  <p class="footer-links">
+    <a href={ROUTES.vote}>Go to the ballot</a>
+  </p>
+</Layout>
+
+<style>
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--space-2);
+    margin: calc(var(--space-6) * -1) 0 var(--space-6);
+    color: var(--text-muted);
+    font-size: 0.875rem;
+  }
+
+  .meta__dot {
+    opacity: 0.6;
+  }
+
+  .board {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: 1.75rem 3.25rem minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3);
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+  }
+
+  .row[data-leader="true"] {
+    border-color: var(--accent);
+    box-shadow: var(--shadow-lift);
+  }
+
+  .row__rank {
+    font-family: var(--font-num);
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .row__thumb {
+    display: block;
+    width: 3.25rem;
+    height: 3.25rem;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: var(--accent-soft);
+  }
+
+  .row__thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .row__main {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    min-width: 0;
+  }
+
+  .row__name {
+    font-weight: 600;
+    font-size: 0.98rem;
+    overflow-wrap: anywhere;
+  }
+
+  .row__track {
+    display: block;
+    height: 0.5rem;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    overflow: hidden;
+  }
+
+  .row__fill {
+    display: block;
+    height: 100%;
+    min-width: 0;
+    border-radius: 999px;
+    background: var(--accent);
+    transition: width 600ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .row__stats {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    min-width: 4.5rem;
+  }
+
+  .row__votes {
+    font-family: var(--font-num);
+    font-size: 1.05rem;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+  }
+
+  .row__pct {
+    color: var(--text-muted);
+    font-family: var(--font-num);
+    font-size: 0.78rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  @media (max-width: 480px) {
+    .row {
+      grid-template-columns: 1.5rem 2.75rem minmax(0, 1fr) auto;
+      gap: var(--space-2);
+    }
+
+    .row__thumb {
+      width: 2.75rem;
+      height: 2.75rem;
+    }
+  }
+</style>
+
+<script>
+  interface CandidateResult {
+    id: string;
+    name: string;
+    imageUrl: string;
+    votes: number;
+    percentage: number;
+  }
+
+  interface ResultsPayload {
+    candidates: CandidateResult[];
+    totalVotes: number;
+    generatedAt: number;
+    staleAt: number;
+    ttlSeconds: number;
+  }
+
+  const board = document.getElementById("board");
+  const updatedEl = document.getElementById("updated-ago");
+  const nextEl = document.getElementById("next-update");
+
+  if (board) {
+    let generatedAt = Number(board.dataset.generatedAt) || Date.now();
+    let staleAt = Number(board.dataset.staleAt) || Date.now();
+    let ttlMs = (Number(board.dataset.ttl) || 300) * 1000;
+    let pollTimer: ReturnType<typeof setTimeout> | undefined;
+    let inFlight = false;
+
+    const numberFormat = new Intl.NumberFormat("en-US");
+
+    function describeAge(ms: number): string {
+      const seconds = Math.max(0, Math.round(ms / 1000));
+      if (seconds < 45) return "just now";
+      const minutes = Math.round(seconds / 60);
+      if (minutes < 60) return `${minutes} min ago`;
+      const hours = Math.round(minutes / 60);
+      return `${hours} hr ago`;
+    }
+
+    function describeCountdown(ms: number): string {
+      if (ms <= 0) return "any moment";
+      const seconds = Math.round(ms / 1000);
+      if (seconds < 60) return `in ${seconds}s`;
+      return `in ${Math.round(seconds / 60)} min`;
+    }
+
+    function paintClock(): void {
+      if (updatedEl) updatedEl.textContent = describeAge(Date.now() - generatedAt);
+      if (nextEl) nextEl.textContent = describeCountdown(staleAt - Date.now());
+    }
+
+    /**
+     * Updates the existing rows in place rather than replacing the list, so the
+     * bar widths animate and the images are never re-decoded. Ordering is done
+     * with the CSS `order` property for the same reason.
+     */
+    function apply(data: ResultsPayload): void {
+      if (!board) return;
+
+      const rows = new Map<string, HTMLElement>();
+      for (const row of board.querySelectorAll<HTMLElement>(".row")) {
+        if (row.dataset.id) rows.set(row.dataset.id, row);
+      }
+
+      // If the ballot itself changed (re-seeded), a full reload is simpler and
+      // safer than patching rows that may not exist.
+      const known = data.candidates.every((candidate) => rows.has(candidate.id));
+      if (!known || rows.size !== data.candidates.length) {
+        window.location.reload();
+        return;
+      }
+
+      const leaderId = data.totalVotes > 0 ? data.candidates[0]?.id : undefined;
+
+      data.candidates.forEach((candidate, index) => {
+        const row = rows.get(candidate.id);
+        if (!row) return;
+
+        row.style.order = String(index);
+
+        const rank = row.querySelector<HTMLElement>("[data-rank]");
+        if (rank) rank.textContent = String(index + 1);
+
+        const votes = row.querySelector<HTMLElement>("[data-votes]");
+        if (votes) votes.textContent = numberFormat.format(candidate.votes);
+
+        const pct = row.querySelector<HTMLElement>("[data-pct]");
+        if (pct) pct.textContent = `${candidate.percentage.toFixed(1)}%`;
+
+        const fill = row.querySelector<HTMLElement>("[data-fill]");
+        if (fill) fill.style.width = `${candidate.percentage}%`;
+
+        if (candidate.id === leaderId) row.dataset.leader = "true";
+        else delete row.dataset.leader;
+      });
+
+      generatedAt = data.generatedAt;
+      staleAt = data.staleAt;
+      ttlMs = data.ttlSeconds * 1000;
+      paintClock();
+    }
+
+    async function refresh(): Promise<void> {
+      if (inFlight || document.visibilityState === "hidden") return;
+      inFlight = true;
+      try {
+        const response = await fetch("/api/results", { headers: { accept: "application/json" } });
+        if (response.ok) apply((await response.json()) as ResultsPayload);
+      } catch {
+        // Offline or a blip. The next scheduled poll will pick it up.
+      } finally {
+        inFlight = false;
+      }
+    }
+
+    /**
+     * Poll just after the cached copy is due to expire rather than on a fixed
+     * interval, so the request that costs a D1 read is the one that actually
+     * needs to happen.
+     *
+     * The floor matters: this colo may hand back an entry another visitor cached
+     * moments ago, whose staleAt is already in the past. Without a floor that
+     * would spin. A tenth of the TTL keeps the page responsive without hammering.
+     */
+    function schedule(): void {
+      clearTimeout(pollTimer);
+      const floor = Math.max(15_000, ttlMs / 10);
+      const delay = Math.max(floor, staleAt - Date.now() + 2_000);
+      pollTimer = setTimeout(async () => {
+        await refresh();
+        schedule();
+      }, delay);
+    }
+
+    setInterval(paintClock, 15_000);
+    paintClock();
+    schedule();
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState !== "visible") return;
+      paintClock();
+      // Coming back to a tab that sat in the background: catch up immediately if
+      // the copy on screen has aged out.
+      if (Date.now() > staleAt) void refresh().then(schedule);
+      else schedule();
+    });
+  }
+</script>

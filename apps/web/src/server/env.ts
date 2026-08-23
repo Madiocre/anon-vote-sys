@@ -19,6 +19,13 @@ export interface Env {
   // is technically absent until wrangler.jsonc sets it; resultsTtl() below is
   // what actually enforces a value at runtime.
   RESULTS_TTL_SECONDS?: string;
+
+  /**
+   * Turnstile's PUBLIC sitekey — deliberately a var, not a secret: it ships to
+   * the browser inside the ballot's `<div class="cf-turnstile" data-sitekey>`.
+   * The matching private half is TURNSTILE_SECRET above.
+   */
+  TURNSTILE_SITEKEY: string;
 }
 
 /**

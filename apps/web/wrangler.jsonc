@@ -4,7 +4,7 @@
 	// Custom entrypoint, required the moment a DO class is declared under
 	// "exports" below — Astro's stock entrypoint exports only a fetch handler,
 	// and the adapter prerenders in workerd, so even `astro build` fails without
-	// this. src/worker.ts re-exports both DO classes (AGENTS.md §2).
+	// this. src/worker.ts re-exports both DO classes and the Astro fetch handler.
 	"main": "src/worker.ts",
 	"compatibility_date": "2026-08-22",
 	"compatibility_flags": ["global_fetch_strictly_public"],
@@ -16,7 +16,6 @@
 		"enabled": true
 	},
 	"vars": {
-		// AGENTS.md §3 — B's Cache-API read-through, 10 minutes.
 		"RESULTS_TTL_SECONDS": "600",
 		// Turnstile's PUBLIC sitekey. Rendered into the ballot markup, so it is a
 		// var and not a secret. This is Cloudflare's always-passes test key —
@@ -46,12 +45,12 @@
 		]
 	},
 	// DO lifecycle declaration. Mutually exclusive with the legacy `migrations`
-	// array — never write both (AGENTS.md §2).
+	// array — never write both.
 	"exports": {
 		"VoteGate": { "type": "durable-object", "storage": "sqlite" },
 		"RateLimiter": { "type": "durable-object", "storage": "sqlite" }
 	},
-	// Rate limiting layer 1 (AGENTS.md §5): native binding, scoped per Cloudflare
+	// Rate limiting layer 1: native binding, scoped per Cloudflare
 	// location. Absorbs bursts at the edge before a DO round trip is paid for.
 	// `period` accepts only 10 or 60.
 	"ratelimits": [
@@ -60,5 +59,61 @@
 			"namespace_id": "1001",
 			"simple": { "limit": 20, "period": 60 }
 		}
-	]
+	],
+
+	// Staging. Deploys as a SEPARATE Worker named `anon-vote-sys-staging`, which
+	// is the entire point: a named environment gets its own Durable Object
+	// namespaces and its own D1, so a test vote can never touch the live tally.
+	//
+	// This is not paranoia about preview URLs — `wrangler versions upload` on the
+	// production Worker would run against the production bindings, meaning a test
+	// vote would land in the real count AND burn a VoteGate claim, which cannot
+	// be deleted. Hence a real second environment rather than a preview.
+	//
+	// EVERYTHING below is duplicated on purpose. Bindings and vars are
+	// non-inheritable — wrangler's own config schema flags d1_databases,
+	// durable_objects, ratelimits, vars and kv_namespaces as "not automatically
+	// inherited from the top level environment". Omit one and it is simply
+	// ABSENT at runtime; there is no error at deploy time. `main`, `assets`,
+	// `exports`, `compatibility_date` and `observability` DO inherit, which is
+	// why they are not repeated.
+	"env": {
+		"staging": {
+			"vars": {
+				// Short TTL so results visibly refresh while testing, instead of
+				// waiting out production's 10 minutes.
+				"RESULTS_TTL_SECONDS": "60",
+				// Staging deliberately keeps Cloudflare's always-passes TEST key.
+				// It needs no real bot protection, and an always-passing challenge
+				// is what lets an automated smoke test actually cast a vote.
+				"TURNSTILE_SITEKEY": "1x00000000000000000000AA"
+			},
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "anon-vote-sys-staging",
+					// Replace after `wrangler d1 create anon-vote-sys-staging`.
+					"database_id": "TODO-CREATE-STAGING-D1",
+					"migrations_dir": "../../packages/db/migrations",
+					"migrations_pattern": "../../packages/db/migrations/*/migration.sql"
+				}
+			],
+			"durable_objects": {
+				"bindings": [
+					{ "name": "VOTE_GATE", "class_name": "VoteGate" },
+					{ "name": "RATE_LIMITER", "class_name": "RateLimiter" }
+				]
+			},
+			"ratelimits": [
+				{
+					"name": "EDGE_RATE_LIMITER",
+					// Must differ from production's 1001 — the namespace id is
+					// unique per ACCOUNT, not per Worker, so reusing it would make
+					// staging traffic count against production's limit.
+					"namespace_id": "1002",
+					"simple": { "limit": 20, "period": 60 }
+				}
+			]
+		}
+	}
 }

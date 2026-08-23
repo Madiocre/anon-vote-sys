@@ -1,17 +1,167 @@
 ---
+import { ROUTES, VOTER_COOKIE } from "@avs/shared";
 
+import CandidateCard from "../components/CandidateCard.astro";
+import Layout from "../layouts/Layout.astro";
+import { cfContext, env } from "../lib/runtime.ts";
+import { getCachedCandidates } from "../server/lib/cache.ts";
+import { cookieAttributes, getVoterStatus, resolveIdentity } from "../server/lib/identity.ts";
+
+export const prerender = false;
+
+const ctx = cfContext(Astro.locals);
+
+const identity = await resolveIdentity(Astro.request, env);
+const status = await getVoterStatus(Astro.request, env, identity);
+
+// Anyone who has already voted never sees the ballot again.
+if (status.hasVoted) {
+  return Astro.redirect(ROUTES.thanks, 303);
+}
+
+// Hand out the anonymous voter id now, so the ballot they are about to see is
+// already tied to an identifier by the time they submit.
+if (identity.isNew) {
+  Astro.cookies.set(VOTER_COOKIE, identity.voterId, {
+    ...cookieAttributes(Astro.request),
+    sameSite: "lax",
+  });
+}
+
+const { value: candidates } = await getCachedCandidates(env, ctx);
+
+const ERRORS: Record<string, string> = {
+  invalid_request: "No candidate was selected. Pick one and press Vote.",
+  unknown_candidate: "That candidate is not on the ballot any more. Please pick another.",
+  verification_failed: "The anti-robot check didn't pass. Please try again.",
+  server_error: "Something went wrong on our side. Please try again.",
+};
+const errorKey = Astro.url.searchParams.get("error");
+const errorMessage = errorKey ? (ERRORS[errorKey] ?? ERRORS.server_error) : null;
+
+// This page is per-voter. It must never be held in a shared cache.
+Astro.response.headers.set("cache-control", "no-store");
 ---
 
-<html lang="en">
-	<head>
-		<meta charset="utf-8" />
-		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-		<link rel="icon" href="/favicon.ico" />
-		<meta name="viewport" content="width=device-width" />
-		<meta name="generator" content={Astro.generator} />
-		<title>Astro</title>
-	</head>
-	<body>
-		<h1>Astro</h1>
-	</body>
-</html>
+<Layout title="Cast your vote" noIndex>
+  <header class="page-header">
+    <h1>Cast your vote</h1>
+    <p>
+      No sign-up, no account. Pick one candidate and press Vote — that's it. One vote per
+      person.
+    </p>
+  </header>
+
+  {errorMessage && <p class="notice" role="alert">{errorMessage}</p>}
+
+  <p class="notice" id="vote-notice" role="alert" hidden></p>
+
+  {
+    candidates.length === 0 ? (
+      <p class="notice">
+        There are no candidates on the ballot yet. Seed the database with{" "}
+        <code>cd packages/db && bun run seed:local</code>.
+      </p>
+    ) : (
+      <ul class="grid" role="list">
+        {candidates.map((candidate, index) => (
+          <CandidateCard
+            candidate={candidate}
+            sitekey={env.TURNSTILE_SITEKEY}
+            eager={index < 5}
+          />
+        ))}
+      </ul>
+    )
+  }
+
+  <p class="footer-links">
+    <a href={ROUTES.results}>See the current results</a>
+  </p>
+</Layout>
+
+<!--
+  Turnstile implicit rendering (AGENTS.md §0): api.js scans the page on load,
+  renders every .cf-turnstile div it finds, and injects the solved token into
+  that div's enclosing form as a hidden `cf-turnstile-response` input. No
+  render() call and no token plumbing on our side — which is precisely why
+  dropping React made this integration simpler rather than harder.
+-->
+<script is:inline async defer src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script>
+
+<script>
+  const forms = Array.from(document.querySelectorAll<HTMLFormElement>("form[data-vote-form]"));
+  const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-vote-button]"));
+  const notice = document.getElementById("vote-notice");
+
+  let submitting = false;
+
+  function showError(message: string): void {
+    if (!notice) return;
+    notice.textContent = message;
+    notice.hidden = false;
+    notice.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+
+  function setBusy(busy: boolean): void {
+    for (const button of buttons) button.disabled = busy;
+  }
+
+  for (const form of forms) {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (submitting) return;
+
+      const button = form.querySelector<HTMLButtonElement>("[data-vote-button]");
+      const data = new FormData(form);
+      const candidateId = data.get("candidateId");
+      // Injected by Turnstile once the challenge is solved. Absent means the
+      // widget has not finished (or failed to load) — the server would reject
+      // the POST anyway, so say so here instead of spending the round trip.
+      const turnstileToken = data.get("cf-turnstile-response");
+
+      if (typeof candidateId !== "string") return;
+      if (typeof turnstileToken !== "string" || turnstileToken === "") {
+        showError("The anti-robot check hasn't finished loading yet. Give it a moment.");
+        return;
+      }
+
+      submitting = true;
+      setBusy(true);
+      const label = button?.innerHTML ?? "";
+      if (button) button.textContent = "Sending…";
+      if (notice) notice.hidden = true;
+
+      try {
+        const response = await fetch("/api/vote", {
+          method: "POST",
+          headers: { "content-type": "application/json", accept: "application/json" },
+          body: JSON.stringify({ candidateId, turnstileToken }),
+        });
+
+        const body = (await response.json().catch(() => null)) as
+          | { ok?: boolean; error?: string; message?: string }
+          | null;
+
+        // A duplicate is not an error from the voter's point of view — their vote
+        // is on record, so send them to the same place a first-time voter lands.
+        if (response.ok || body?.error === "already_voted") {
+          window.location.assign("/thanks");
+          return;
+        }
+
+        showError(body?.message ?? "Your vote could not be recorded. Please try again.");
+      } catch {
+        showError("Network problem — your vote was not recorded. Please try again.");
+      }
+
+      // Turnstile tokens are single-use, so a retry needs a fresh one. Without
+      // this reset the second attempt would always fail verification.
+      window.turnstile?.reset();
+
+      submitting = false;
+      setBusy(false);
+      if (button) button.innerHTML = label;
+    });
+  }
+</script>

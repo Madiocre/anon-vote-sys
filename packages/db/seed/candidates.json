@@ -5,7 +5,18 @@
     "  name      - the single name sentence shown under the image.",
     "  imageUrl  - absolute URL to the candidate's image.",
     "  sortOrder - tie-breaker ordering on both the voting grid and the results page.",
-    "Re-running the seed upserts by id: names and images update, existing votes are kept."
+    "Re-running the seed upserts by id: names and images update, existing votes are kept.",
+    "",
+    "IMAGES: the URLs below are placeholders. Production images are served from",
+    "jsDelivr, backed by a separate PUBLIC assets repo (see docs/images.md):",
+    "",
+    "  https://cdn.jsdelivr.net/gh/<user>/<assets-repo>@<tag>/candidates/<file>.webp",
+    "",
+    "Pin a TAG or commit SHA, never a branch. jsDelivr caches tags and SHAs for a",
+    "year; a branch URL is cached for only 12 hours, so it both re-fetches",
+    "constantly and can serve a stale image for half a day after you update it.",
+    "To change a photo: commit it, re-tag the assets repo, bump the tag here, then",
+    "re-run `bun run seed:remote`."
   ],
   "candidates": [
     { "id": "candidate-01", "name": "Candidate One", "imageUrl": "https://placehold.co/400x400?text=1", "sortOrder": 1 },

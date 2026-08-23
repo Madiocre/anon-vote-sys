@@ -3,7 +3,8 @@
  * to D1 via wrangler.
  *
  *   bun run seed:local     # .wrangler/state miniflare D1
- *   bun run seed:remote    # the real database
+ *   bun run seed:staging   # the anon-vote-sys-staging database
+ *   bun run seed:remote    # the real production database
  *
  * Extra flags:
  *   --prune   also DELETE candidates that are no longer in the JSON file.
@@ -21,7 +22,6 @@ const PKG_ROOT = resolve(HERE, "..");
 const WRANGLER_CONFIG = resolve(PKG_ROOT, "../../apps/web/wrangler.jsonc");
 const OUT_DIR = join(PKG_ROOT, ".generated");
 const OUT_FILE = join(OUT_DIR, "seed.sql");
-const DB_NAME = "anon-vote-sys";
 
 interface SeedCandidate {
   id: string;
@@ -31,10 +31,17 @@ interface SeedCandidate {
 }
 
 const args = new Set(process.argv.slice(2));
-const remote = args.has("--remote");
-const local = args.has("--local") || !remote;
+const staging = args.has("--staging");
+// --staging implies remote: the staging D1 only exists on Cloudflare.
+const remote = args.has("--remote") || staging;
+const local = !remote;
 const prune = args.has("--prune");
 const dry = args.has("--dry");
+
+// Named environments deploy as `<name>-<env>`, and their D1 is a genuinely
+// separate database — see the `env.staging` block in apps/web/wrangler.jsonc.
+const DB_NAME = staging ? "anon-vote-sys-staging" : "anon-vote-sys";
+const ENV_FLAGS = staging ? ["--env", "staging"] : [];
 
 /** SQLite string literal: single quotes doubled, wrapped in quotes. */
 function q(value: string): string {
@@ -99,8 +106,9 @@ mkdirSync(OUT_DIR, { recursive: true });
 writeFileSync(OUT_FILE, sql, "utf8");
 
 const target = remote ? "--remote" : "--local";
+const where = staging ? "staging" : remote ? "remote" : "local";
 console.log(
-  `Seeding ${candidates.length} candidate(s) into ${DB_NAME} (${remote ? "remote" : "local"})${
+  `Seeding ${candidates.length} candidate(s) into ${DB_NAME} (${where})${
     prune ? " with --prune" : ""
   }...`,
 );
@@ -118,6 +126,7 @@ const proc = Bun.spawnSync({
     target,
     "--config",
     WRANGLER_CONFIG,
+    ...ENV_FLAGS,
     "--file",
     OUT_FILE,
     ...(remote ? ["--yes"] : []),
@@ -128,7 +137,9 @@ const proc = Bun.spawnSync({
 
 if (proc.exitCode !== 0) {
   console.error(`\nwrangler exited with code ${proc.exitCode}.`);
-  if (local) console.error("If the table is missing, run `bun run migrate:local` first.");
+  // Almost always a missing table: seeding a database that was never migrated.
+  const migrate = staging ? "migrate:staging" : local ? "migrate:local" : "migrate:remote";
+  console.error(`If the table is missing, run \`bun run ${migrate}\` first.`);
   process.exit(proc.exitCode ?? 1);
 }
 

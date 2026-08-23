@@ -1,0 +1,63 @@
+---
+import type { Candidate } from "@avs/shared";
+
+interface Props {
+  candidate: Candidate;
+  /** Turnstile's public sitekey, read from env by the page rendering this. */
+  sitekey: string;
+  /** The first row is above the fold on most screens; the rest can load lazily. */
+  eager?: boolean;
+}
+
+const { candidate, sitekey, eager = false } = Astro.props;
+---
+
+<li class="card">
+  <div class="card__media">
+    <img
+      src={candidate.imageUrl}
+      alt=""
+      width="800"
+      height="800"
+      loading={eager ? "eager" : "lazy"}
+      decoding="async"
+      fetchpriority={eager ? "high" : "auto"}
+    />
+  </div>
+
+  <div class="card__body">
+    <h2 class="card__name" id={`name-${candidate.id}`}>{candidate.name}</h2>
+
+    <!--
+      A real form with a real action: voting works with JavaScript disabled, in
+      which case the API answers the POST with a 303 to /thanks. The inline
+      script on index.astro upgrades it to fetch when JS is available.
+    -->
+    <form method="POST" action="/api/vote" class="vote-form" data-vote-form>
+      <input type="hidden" name="candidateId" value={candidate.id} />
+
+      <!--
+        Turnstile IMPLICIT rendering (AGENTS.md §0). The api.js script loaded by
+        index.astro scans for .cf-turnstile on load, renders the widget here, and
+        injects a hidden `<input name="cf-turnstile-response">` into this form
+        once the challenge is solved. Nothing else has to wire the token up:
+        `new FormData(form)` picks it up for the fetch path, and an ordinary form
+        POST carries it for the no-JS path.
+
+        One widget per card is deliberate. Turnstile tokens are single-use and
+        bound to the widget that produced them, so a shared widget would hand the
+        same spent token to every form on the page.
+      -->
+      <div class="cf-turnstile" data-sitekey={sitekey} data-size="flexible"></div>
+
+      <noscript>
+        With JavaScript disabled the check above cannot run, so this vote will be
+        rejected. Enable JavaScript to vote.
+      </noscript>
+
+      <button type="submit" class="btn" data-vote-button>
+        Vote<span class="visually-hidden"> for {candidate.name}</span>
+      </button>
+    </form>
+  </div>
+</li>

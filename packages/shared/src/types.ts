@@ -38,7 +38,18 @@ export interface VoteSuccess {
 
 export interface VoteFailure {
   ok: false;
-  error: "already_voted" | "unknown_candidate" | "invalid_request" | "server_error";
+  /**
+   * `verification_failed` covers both halves of the Turnstile check — a POST
+   * that carried no token at all, and one whose token the siteverify endpoint
+   * rejected. Kept distinct from `invalid_request` so the ballot can say "the
+   * check didn't pass, try again" rather than "no candidate was selected".
+   */
+  error:
+    | "already_voted"
+    | "unknown_candidate"
+    | "invalid_request"
+    | "verification_failed"
+    | "server_error";
   message: string;
   /** Present when the failure is `already_voted` and we know the earlier pick. */
   candidateId?: string;

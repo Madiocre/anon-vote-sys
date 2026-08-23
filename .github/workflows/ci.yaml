@@ -39,6 +39,43 @@ jobs:
       - name: Generate Worker types
         run: bun run --cwd apps/web types
 
+      # =================================================================
+      # FIXME — this step FAILS on a clean clone. Fix identified, NOT applied.
+      #
+      # Reproduced locally by deleting apps/web/.astro:
+      #   src/lib/runtime.ts(22,17): error TS2339:
+      #     Property 'cfContext' does not exist on type 'Locals'.
+      #
+      # The cause is NOT tsc typechecking .astro files — tsc ignores those
+      # entirely, they are never part of the program. It is a second piece of
+      # gitignored codegen, alongside worker-configuration.d.ts above:
+      #
+      #   apps/web/.astro/integrations/_astrojs_cloudflare/cloudflare.d.ts
+      #
+      # That generated file is one line —
+      #   /// <reference types="@astrojs/cloudflare/types.d.ts" />
+      # — and it is what augments App.Locals with `cfContext`. apps/web/.gitignore
+      # line 4 ignores `.astro/`, so a fresh clone lacks it and
+      # src/lib/runtime.ts stops compiling. It passes locally only because a
+      # previous build left .astro/ behind.
+      #
+      # FIX: run `astro sync` before this step —
+      #   - name: Generate Astro types
+      #     run: bun x --cwd apps/web astro sync
+      #
+      # Verified locally: astro sync regenerates .astro/ and the typecheck then
+      # passes. `astro build` also generates it, but that runs AFTER this gate,
+      # which is too late; sync is also much cheaper.
+      #
+      # Note this is separate from the .astro-files-are-untypechecked gap in the
+      # Build step below — that one is a real TypeScript 7 limitation with no
+      # fix available. This one is just a missing codegen step.
+      #
+      # Same fix needed in deploy.yaml, in its `check` job only. The `staging`
+      # and `production` jobs run `types` + `build` without `check`, and
+      # `astro build` regenerates .astro/ itself, so neither is affected.
+      # =================================================================
+
       # typecheck (three workspaces, both tsconfigs) + 87 server tests.
       - name: test
         run: bun run check

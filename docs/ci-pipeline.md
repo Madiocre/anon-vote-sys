@@ -4,8 +4,8 @@ Two committed workflows. Push, and they run.
 
 | File | Trigger | What it does |
 | --- | --- | --- |
-| `.github/workflows/ci.yml` | pull requests, pushes to any branch except `main` | Gate, then deploy to staging and smoke test it. Never touches production. |
-| `.github/workflows/deploy.yml` | pushes to `main`, or manual dispatch | Promotion pipeline: gate → staging → smoke → production. |
+| `.github/workflows/ci.yaml` | pull requests, pushes to any branch except `main` | Gate, then deploy to staging and smoke test it. Never touches production. |
+| `.github/workflows/deploy.yaml` | pushes to `main`, or manual dispatch | Promotion pipeline: gate → staging → smoke → production. |
 
 ## Production is not directly reachable
 
@@ -94,23 +94,30 @@ write access to the vote database. That is the point of leaving them out.
 wrangler d1 create anon-vote-sys
 ```
 
-> **Blocker: the staging database does not exist yet.** `env.staging.d1_databases[0].database_id` in
-> `apps/web/wrangler.jsonc` is still the literal placeholder `TODO-CREATE-STAGING-D1`. Because every
-> path to production now runs through staging, **the entire pipeline fails until this is done**:
->
-> ```bash
-> wrangler d1 create anon-vote-sys-staging
-> ```
->
-> Paste the returned id into that field, then migrate and seed it:
+The staging database exists and is wired into `env.staging`. Note it uses the **same binding name**
+as production — `DB` — which is deliberate: the code always reads `env.DB`, and which database that
+resolves to is decided by which environment was built. A differently-named binding would mean the
+code could not find it at all.
+
+> **Still outstanding before the pipeline can go green**, because every path to production runs
+> through staging:
 >
 > ```bash
 > cd packages/db && bun run migrate:staging && bun run seed:staging
 > ```
 >
-> Staging also needs its own three secrets — they do not inherit from production:
-> `wrangler secret put VOTE_SALT --env staging`, and likewise `COOKIE_SECRET` and
-> `TURNSTILE_SECRET` (use the always-passes test secret for staging).
+> and staging's own three secrets, which do **not** inherit from production:
+>
+> ```bash
+> cd apps/web && bun x wrangler secret put VOTE_SALT --env staging
+> ```
+>
+> …likewise `COOKIE_SECRET`, and `TURNSTILE_SECRET` (use the always-passes test secret
+> `1x0000000000000000000000000000000AA` for staging, matching the test sitekey already in
+> `env.staging.vars`).
+>
+> Until the staging database is migrated and seeded, `scripts/smoke.ts` will fail its
+> `/api/candidates` check — which is the smoke test doing its job, not a false alarm.
 
 **4. Set the three secrets on the Worker**, after the first successful deploy has created it:
 

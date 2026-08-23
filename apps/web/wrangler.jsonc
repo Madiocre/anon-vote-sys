@@ -37,11 +37,6 @@
 			// migrations_dir.
 			"migrations_dir": "../../packages/db/migrations",
 			"migrations_pattern": "../../packages/db/migrations/*/migration.sql"
-		},
-		{
-			"binding": "anon_vote_sys_staging",
-			"database_name": "anon-vote-sys-staging",
-			"database_id": "323fea69-5b44-4928-b663-af3022c27631"
 		}
 	],
 	// What the code actually calls: env.VOTE_GATE / env.RATE_LIMITER.
@@ -111,10 +106,12 @@
 			},
 			"d1_databases": [
 				{
+					// Same binding NAME as production on purpose — the code always
+					// reads env.DB. What differs is which database it points at,
+					// and that is decided by which environment was built.
 					"binding": "DB",
 					"database_name": "anon-vote-sys-staging",
-					// Replace after `wrangler d1 create anon-vote-sys-staging`.
-					"database_id": "TODO-CREATE-STAGING-D1",
+					"database_id": "323fea69-5b44-4928-b663-af3022c27631",
 					"migrations_dir": "../../packages/db/migrations",
 					"migrations_pattern": "../../packages/db/migrations/*/migration.sql"
 				}

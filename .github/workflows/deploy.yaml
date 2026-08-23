@@ -14,7 +14,7 @@ on:
       - "packages/**"
       - "scripts/**"
       - "bun.lock"
-      - ".github/workflows/deploy.yml"
+      - ".github/workflows/deploy.yaml"
   workflow_dispatch:
     inputs:
       staging_only:
@@ -43,7 +43,12 @@ jobs:
       # worker-configuration.d.ts is gitignored; without regenerating it the
       # typecheck fails with 19 "cannot find name/module" errors. No creds needed.
       - run: bun run --cwd apps/web types
+
+      # apps/web's typecheck script runs `wrangler types && astro sync` itself
+      # before tsc, because both outputs are gitignored and a fresh clone has
+      # neither. See the longer note in ci.yaml above its `test` step.
       - run: bun run check
+
       - run: bun run --cwd apps/web build
 
   # 2. Deploy to staging — its own Worker, D1, DO namespaces and rate limiter.

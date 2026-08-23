@@ -16,7 +16,7 @@ permissions:
 jobs:
   # The offline gate. Runs for every PR including forks, since it needs no secrets.
   check:
-    name: Typecheck and test
+    name: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -31,19 +31,41 @@ jobs:
       - name: Install
         run: bun install --frozen-lockfile
 
-      # Required, and not obvious. worker-configuration.d.ts is gitignored, so a
-      # fresh clone has no declarations for D1Database, DurableObjectNamespace,
-      # RateLimit, ExecutionContext or the cloudflare:workers module. Without
-      # this the typecheck fails with 19 "cannot find name/module" errors that
-      # look like broken imports. Reads wrangler.jsonc only — no credentials.
+      # Generates worker-configuration.d.ts. Kept as its own step so a failure
+      # here is legible, but it is no longer load-bearing — `typecheck` runs it
+      # too (see below), and both runs are idempotent.
       - name: Generate Worker types
         run: bun run --cwd apps/web types
 
-      # typecheck (three workspaces, both tsconfigs) + 87 server tests.
-      - name: Typecheck and test
+      # `bun run check` is typecheck + 87 server tests, and apps/web's typecheck
+      # is now self-sufficient:
+      #
+      #   wrangler types && astro sync && tsc --noEmit && tsc -p tsconfig.test.json
+      #
+      # Both codegen steps are there because BOTH outputs are gitignored, so a
+      # fresh clone has neither and tsc fails on things that look like broken
+      # imports rather than missing codegen:
+      #
+      #   * wrangler types -> worker-configuration.d.ts, which declares
+      #     D1Database, DurableObjectNamespace, RateLimit, ExecutionContext and
+      #     the cloudflare:workers module. Missing it = 19 errors.
+      #   * astro sync -> .astro/integrations/_astrojs_cloudflare/cloudflare.d.ts,
+      #     a one-line `/// <reference types="@astrojs/cloudflare/types.d.ts" />`
+      #     that augments App.Locals with `cfContext`. Missing it = the
+      #     "Property 'cfContext' does not exist on type 'Locals'" failure that
+      #     broke this workflow on its first real run.
+      #
+      # Putting them inside the script rather than adding workflow steps means a
+      # fresh local clone behaves like CI, and a future workflow cannot forget
+      # them. Verified by deleting .astro/, dist/ and worker-configuration.d.ts
+      # and running `bun run check` alone: exit 0.
+      #
+      # NOTE: this is unrelated to .astro files being untypechecked (the Build
+      # step below). That one is a real TypeScript 7 limitation with no fix yet.
+      - name: test
         run: bun run check
 
-      # The only gate on .astro files: astro check cannot run against
+      # The only gate on .astro files: astro check cannot run against - TODO add a test for this after astro adapts the new typescript 7
       # TypeScript 7, so the build is what catches template and import errors.
       - name: Build
         run: bun run --cwd apps/web build

@@ -16,7 +16,7 @@ permissions:
 jobs:
   # The offline gate. Runs for every PR including forks, since it needs no secrets.
   check:
-    name: Typecheck and test
+    name: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -40,10 +40,10 @@ jobs:
         run: bun run --cwd apps/web types
 
       # typecheck (three workspaces, both tsconfigs) + 87 server tests.
-      - name: Typecheck and test
+      - name: test
         run: bun run check
 
-      # The only gate on .astro files: astro check cannot run against
+      # The only gate on .astro files: astro check cannot run against - TODO add a test for this after astro adapts the new typescript 7
       # TypeScript 7, so the build is what catches template and import errors.
       - name: Build
         run: bun run --cwd apps/web build

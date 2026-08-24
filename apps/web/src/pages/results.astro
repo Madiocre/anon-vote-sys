@@ -252,12 +252,38 @@ const hasVotes = results.totalVotes > 0;
   const updatedEl = document.getElementById("updated-ago");
   const nextEl = document.getElementById("next-update");
 
+  /**
+   * Stop polling once nobody is reading.
+   *
+   * `refresh()` already skips a hidden tab, so a backgrounded one costs nothing.
+   * The gap this closes is a tab left open and VISIBLE — a second monitor, a
+   * forgotten window — which otherwise polls forever. Every poll is a Worker
+   * request against the free tier's daily budget.
+   *
+   * Fifteen minutes rather than something tighter because reading a results
+   * board is passive: someone can legitimately watch for ten minutes without
+   * touching anything, and pausing under them would be worse than the handful
+   * of requests it saves.
+   */
+  const IDLE_AFTER_MS = 15 * 60_000;
+
+  /**
+   * Backstop only. Idle detection is the real mechanism; this bounds the
+   * pathological case where something keeps emitting activity events. At the
+   * production TTL this is ~33 hours, so a genuine reader never reaches it.
+   */
+  const MAX_POLLS = 200;
+
   if (board) {
     let generatedAt = Number(board.dataset.generatedAt) || Date.now();
     let staleAt = Number(board.dataset.staleAt) || Date.now();
     let ttlMs = (Number(board.dataset.ttl) || 300) * 1000;
     let pollTimer: ReturnType<typeof setTimeout> | undefined;
+    let clockTimer: ReturnType<typeof setInterval> | undefined;
     let inFlight = false;
+    let lastActivity = Date.now();
+    let polls = 0;
+    let paused = false;
 
     const numberFormat = new Intl.NumberFormat("en-US");
 
@@ -278,8 +304,10 @@ const hasVotes = results.totalVotes > 0;
     }
 
     function paintClock(): void {
+      // "Updated X ago" stays truthful while paused — coming back to "3 hr ago"
+      // is exactly the right information. Only the countdown is replaced.
       if (updatedEl) updatedEl.textContent = describeAge(Date.now() - generatedAt);
-      if (nextEl) nextEl.textContent = describeCountdown(staleAt - Date.now());
+      if (nextEl && !paused) nextEl.textContent = describeCountdown(staleAt - Date.now());
     }
 
     /**
@@ -360,17 +388,66 @@ const hasVotes = results.totalVotes > 0;
       const floor = Math.max(15_000, ttlMs / 10);
       const delay = Math.max(floor, staleAt - Date.now() + 2_000);
       pollTimer = setTimeout(async () => {
+        // Checked at fire time rather than when scheduling, so a tab abandoned
+        // mid-interval stops at the end of that interval rather than polling on.
+        if (Date.now() - lastActivity > IDLE_AFTER_MS || polls >= MAX_POLLS) {
+          pause();
+          return;
+        }
+        polls += 1;
         await refresh();
         schedule();
       }, delay);
     }
 
-    setInterval(paintClock, 15_000);
+    /** Stops the loop dead and says so. A board that silently froze is worse. */
+    function pause(): void {
+      if (paused) return;
+      paused = true;
+      clearTimeout(pollTimer);
+      clearInterval(clockTimer);
+      // The span sits inside `.meta`, which carries role="status", so this is
+      // announced. Reads as "Next refresh paused (click to resume)".
+      if (nextEl) nextEl.textContent = "paused (click to resume)";
+    }
+
+    function resume(): void {
+      if (!paused) return;
+      paused = false;
+      polls = 0;
+      clockTimer = setInterval(paintClock, 15_000);
+      paintClock();
+      // Same catch-up the visibilitychange handler does: if what is on screen
+      // has already aged out, refresh now rather than waiting a full interval.
+      if (Date.now() > staleAt) void refresh().then(schedule);
+      else schedule();
+    }
+
+    function markActivity(): void {
+      lastActivity = Date.now();
+      if (paused) resume();
+    }
+
+    clockTimer = setInterval(paintClock, 15_000);
     paintClock();
     schedule();
 
+    // Any of these counts as "someone is still reading". Passive listeners so
+    // scrolling is never blocked on this.
+    for (const event of ["pointerdown", "keydown", "scroll", "focus"] as const) {
+      window.addEventListener(event, markActivity, { passive: true });
+    }
+
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState !== "visible") return;
+
+      // Returning to the tab is itself activity, and markActivity() resumes if
+      // we had paused — which also reschedules, so bail out rather than fall
+      // through and start a second timer.
+      const wasPaused = paused;
+      markActivity();
+      if (wasPaused) return;
+
       paintClock();
       // Coming back to a tab that sat in the background: catch up immediately if
       // the copy on screen has aged out.

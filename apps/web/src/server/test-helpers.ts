@@ -3,7 +3,7 @@
  *
  * These run under `bun test`, not workerd, which works because nothing in
  * src/server imports a Durable Object class at runtime — env.ts pulls in
- * `VoteGate`/`RateLimiter` with `import type`, which is erased. So the Hono app
+ * `RateLimiter` with `import type`, which is erased. So the Hono app
  * and every lib module load in plain Bun, and only the *bindings* need faking.
  *
  * What is NOT covered here, deliberately: real D1, real Durable Object storage,
@@ -13,32 +13,6 @@
  */
 
 import type { Env } from "./env.ts";
-
-/** A DO stub that reproduces VoteGate's contract: first claim per id wins. */
-export function makeVoteGateNamespace() {
-  const claimed = new Set<string>();
-  const released: string[] = [];
-
-  return {
-    claimed,
-    /** Ids whose claim was handed back — the D1-write-failed path. */
-    released,
-    namespace: {
-      idFromName: (name: string) => ({ name }),
-      get: (id: { name: string }) => ({
-        claim: async (): Promise<boolean> => {
-          if (claimed.has(id.name)) return false;
-          claimed.add(id.name);
-          return true;
-        },
-        release: async (): Promise<void> => {
-          claimed.delete(id.name);
-          released.push(id.name);
-        },
-      }),
-    },
-  };
-}
 
 /** A DO stub for RateLimiter, counting calls per key against a fixed window. */
 export function makeRateLimiterNamespace(options: { allow?: boolean } = {}) {
@@ -66,7 +40,6 @@ export function makeRateLimiterNamespace(options: { allow?: boolean } = {}) {
 
 export interface EnvStub {
   env: Env;
-  voteGate: ReturnType<typeof makeVoteGateNamespace>;
   rateLimiter: ReturnType<typeof makeRateLimiterNamespace>;
   edgeCalls: Array<{ key: string }>;
 }
@@ -80,13 +53,11 @@ export function makeEnv(
   overrides: Partial<Env> = {},
   options: { edgeAllows?: boolean; rateLimiterAllows?: boolean } = {},
 ): EnvStub {
-  const voteGate = makeVoteGateNamespace();
   const rateLimiter = makeRateLimiterNamespace({ allow: options.rateLimiterAllows });
   const edgeCalls: Array<{ key: string }> = [];
 
   const env = {
     DB: {} as Env["DB"],
-    VOTE_GATE: voteGate.namespace as unknown as Env["VOTE_GATE"],
     RATE_LIMITER: rateLimiter.namespace as unknown as Env["RATE_LIMITER"],
     EDGE_RATE_LIMITER: {
       limit: async ({ key }: { key: string }) => {
@@ -102,7 +73,7 @@ export function makeEnv(
     ...overrides,
   } as Env;
 
-  return { env, voteGate, rateLimiter, edgeCalls };
+  return { env, rateLimiter, edgeCalls };
 }
 
 /** Builds a Request with the headers the identity layer actually reads. */

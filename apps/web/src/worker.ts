@@ -19,9 +19,8 @@
 import { handle } from "@astrojs/cloudflare/handler";
 
 import { RateLimiter } from "./server/durable-objects/rate-limiter";
-import { VoteGate } from "./server/durable-objects/vote-gate";
 
-export { VoteGate, RateLimiter };
+export { RateLimiter };
 
 export default {
   fetch(request, env, ctx) {

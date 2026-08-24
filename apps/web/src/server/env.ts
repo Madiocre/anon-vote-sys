@@ -1,11 +1,9 @@
-import type { VoteGate } from "./durable-objects/vote-gate";
 import type { RateLimiter } from "./durable-objects/rate-limiter";
 import { DEFAULT_RESULTS_TTL_SECONDS } from "@avs/shared";
 
 export interface Env {
   // Bindings
   DB: D1Database;
-  VOTE_GATE: DurableObjectNamespace<VoteGate>;
   RATE_LIMITER: DurableObjectNamespace<RateLimiter>;
   /** Native Workers rate limiting binding declared under "ratelimits" in wrangler.jsonc. */
   EDGE_RATE_LIMITER: RateLimit;

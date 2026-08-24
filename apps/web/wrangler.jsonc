@@ -39,13 +39,9 @@
 			"migrations_pattern": "../../packages/db/migrations/*/migration.sql"
 		}
 	],
-	// What the code actually calls: env.VOTE_GATE / env.RATE_LIMITER.
+	// What the code actually calls: env.RATE_LIMITER.
 	"durable_objects": {
 		"bindings": [
-			{
-				"name": "VOTE_GATE",
-				"class_name": "VoteGate"
-			},
 			{
 				"name": "RATE_LIMITER",
 				"class_name": "RateLimiter"
@@ -54,10 +50,23 @@
 	},
 	// DO lifecycle declaration. Mutually exclusive with the legacy `migrations`
 	// array — never write both.
+	//
+	// VoteGate is being deleted. It duplicated the UNIQUE index on voter_id —
+	// getVoterStatus already proves D1 has no row before the gate was reached,
+	// so its only remaining job was the concurrent-double-submit race, which
+	// onConflictDoNothing wins atomically. It cost one DO request and one DO
+	// storage write per vote: half the app's entire Durable Object budget.
+	//
+	// TWO-STEP REMOVAL. A live class is deleted by deploying a tombstone, not by
+	// deleting the config entry — Cloudflare warns "There is no Trash for
+	// Durable Object namespaces deleted through `exports`", which is the point
+	// here: the stored claims are exactly what we want gone.
+	//   1. THIS deploy: state "deleted", code no longer references the class.
+	//   2. NEXT deploy: delete the "VoteGate" entry below entirely.
 	"exports": {
 		"VoteGate": {
 			"type": "durable-object",
-			"storage": "sqlite"
+			"state": "deleted"
 		},
 		"RateLimiter": {
 			"type": "durable-object",
@@ -92,9 +101,9 @@
 	// namespaces and its own D1, so a test vote can never touch the live tally.
 	//
 	// This is not paranoia about preview URLs — `wrangler versions upload` on the
-	// production Worker would run against the production bindings, meaning a test
-	// vote would land in the real count AND burn a VoteGate claim, which cannot
-	// be deleted. Hence a real second environment rather than a preview.
+	// production Worker would run against the production bindings, so a test vote
+	// would land in the real count. Hence a real second environment rather than a
+	// preview.
 	//
 	// EVERYTHING below is duplicated on purpose. Bindings and vars are
 	// non-inheritable — wrangler's own config schema flags d1_databases,
@@ -128,10 +137,6 @@
 			],
 			"durable_objects": {
 				"bindings": [
-					{
-						"name": "VOTE_GATE",
-						"class_name": "VoteGate"
-					},
 					{
 						"name": "RATE_LIMITER",
 						"class_name": "RateLimiter"

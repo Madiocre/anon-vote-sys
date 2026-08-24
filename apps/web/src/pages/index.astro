@@ -2,6 +2,7 @@
 import { ROUTES, VOTER_COOKIE } from "@avs/shared";
 
 import CandidateCard from "../components/CandidateCard.astro";
+import VoteConfirmation from "../components/VoteConfirmation.astro";
 import Layout from "../layouts/Layout.astro";
 import { cfContext, env } from "../lib/runtime.ts";
 import { getCachedCandidates } from "../server/lib/cache.ts";
@@ -62,43 +63,49 @@ Astro.response.headers.set("cache-control", "no-store");
 // are emitted to the browser, frontmatter comments are stripped.
 ---
 
-<Layout title="Cast your vote" noIndex>
-  <header class="page-header">
-    <h1>Cheervote</h1>
-    <p>
-      Cheer on your Model, Pick one every 3 days.
-    </p>
-  </header>
-
-  {errorMessage && <p class="notice" role="alert">{errorMessage}</p>}
-
-  <p class="notice" id="vote-notice" role="alert" hidden></p>
-
-  {
-    candidates.length === 0 ? (
-      <p class="notice">
-        There are no candidates on the ballot yet. Please Wait for the next round of voting to begin.
+<Layout title="Pick your Model" noIndex>
+  <div id="ballot">
+    <header class="page-header">
+      <h1>Cheervote</h1>
+      <p>
+        Cheer on your Model, Pick one every 3 days.
       </p>
-    ) : (
-      <ul class="grid" role="list">
-        {candidates.map((candidate, index) => (
-          <CandidateCard candidate={candidate} eager={index < 5} />
-        ))}
-      </ul>
-    )
-  }
+    </header>
 
-  <div id="turnstile-host" class="turnstile-host" data-sitekey={env.TURNSTILE_SITEKEY}></div>
+    {errorMessage && <p class="notice" role="alert">{errorMessage}</p>}
 
-  <noscript>
-    <p class="notice">
-      Voting needs JavaScript enabled — the anti-robot check cannot run without it.
+    <p class="notice" id="vote-notice" role="alert" hidden></p>
+
+    {
+      candidates.length === 0 ? (
+        <p class="notice">
+          There are no candidates on the ballot yet. Please Wait for the next round of voting to begin.
+        </p>
+      ) : (
+        <ul class="grid" role="list">
+          {candidates.map((candidate, index) => (
+            <CandidateCard candidate={candidate} eager={index < 5} />
+          ))}
+        </ul>
+      )
+    }
+
+    <div id="turnstile-host" class="turnstile-host" data-sitekey={env.TURNSTILE_SITEKEY}></div>
+
+    <noscript>
+      <p class="notice">
+        Voting needs JavaScript enabled — the anti-robot check cannot run without it.
+      </p>
+    </noscript>
+
+    <p class="footer-links">
+      <a href={ROUTES.results}>See the current results</a>
     </p>
-  </noscript>
+  </div>
 
-  <p class="footer-links">
-    <a href={ROUTES.results}>See the current results</a>
-  </p>
+  <section id="vote-confirmation" hidden>
+    <VoteConfirmation />
+  </section>
 </Layout>
 
 <script
@@ -112,6 +119,8 @@ Astro.response.headers.set("cache-control", "no-store");
   const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-vote-button]"));
   const notice = document.getElementById("vote-notice");
   const host = document.getElementById("turnstile-host");
+  const ballot = document.getElementById("ballot");
+  const confirmation = document.getElementById("vote-confirmation");
 
   let submitting = false;
   let widgetId: string | undefined;
@@ -132,6 +141,53 @@ Astro.response.headers.set("cache-control", "no-store");
   function finish(token: string | null): void {
     settle?.(token);
     settle = undefined;
+  }
+
+  /**
+   * Swaps the ballot for the confirmation without navigating.
+   *
+   * This is what keeps a vote to two Worker requests instead of three — the
+   * candidate's name and image are already on the page, so nothing has to be
+   * fetched to render the receipt. /thanks still exists for the no-JS path,
+   * for returning voters, and for direct links.
+   */
+  function showConfirmation(form: HTMLFormElement, candidateId: string): void {
+    if (!ballot || !confirmation) {
+      // Markup missing for some reason — fall back rather than strand the voter
+      // on a ballot that appears to have done nothing.
+      window.location.assign("/thanks");
+      return;
+    }
+
+    const card = form.closest<HTMLElement>("[data-candidate-card]");
+    const name = document.getElementById(`name-${candidateId}`)?.textContent?.trim();
+    const image = card?.querySelector<HTMLImageElement>("[data-candidate-image]")?.currentSrc;
+
+    if (name) {
+      for (const slot of confirmation.querySelectorAll("[data-confirm-name]")) {
+        slot.textContent = name;
+      }
+    }
+
+    const target = confirmation.querySelector<HTMLImageElement>("[data-confirm-image]");
+    // currentSrc is already resolved and in cache, so this paints immediately.
+    if (target && image) target.src = image;
+
+    ballot.hidden = true;
+    confirmation.hidden = false;
+
+    // The challenge is done with; leaving the widget mounted keeps an iframe
+    // and its refresh timer alive for nothing.
+    if (widgetId !== undefined) window.turnstile?.remove(widgetId);
+
+    // Without this a refresh lands on "/", which redirects to /thanks — two
+    // requests instead of one. It also keeps the URL honest about what is on
+    // screen, and makes the back button behave.
+    history.replaceState({}, "", "/thanks");
+
+    // A silent DOM swap is invisible to a screen reader. Moving focus is a
+    // stronger signal than aria-live for a whole-view change.
+    document.getElementById("confirmation-heading")?.focus();
   }
 
   /**
@@ -193,6 +249,10 @@ Astro.response.headers.set("cache-control", "no-store");
       if (button) button.textContent = "Verifying…";
       if (notice) notice.hidden = true;
 
+      // Set once the vote is on record, so the cleanup below leaves the page in
+      // its finished state instead of re-enabling a ballot that is now hidden.
+      let done = false;
+
       try {
         const turnstileToken = await mintToken();
         if (!turnstileToken) {
@@ -212,9 +272,18 @@ Astro.response.headers.set("cache-control", "no-store");
           | { ok?: boolean; error?: string; message?: string }
           | null;
 
+        if (response.ok) {
+          done = true;
+          showConfirmation(form, candidateId);
+          return;
+        }
+
         // A duplicate is not an error from the voter's point of view — their vote
-        // is on record, so send them to the same place a first-time voter lands.
-        if (response.ok || body?.error === "already_voted") {
+        // is on record. Navigate rather than render inline: this means they voted
+        // in another tab, so the candidate on record may not be the one they just
+        // clicked, and /thanks can resolve it properly.
+        if (body?.error === "already_voted") {
+          done = true;
           window.location.assign("/thanks");
           return;
         }
@@ -223,9 +292,14 @@ Astro.response.headers.set("cache-control", "no-store");
       } catch {
         showError("Network problem — your vote was not recorded. Please try again.");
       } finally {
-        submitting = false;
-        setBusy(false);
-        if (button) button.innerHTML = label;
+        // Only reset on a path the voter can retry from. After a recorded vote
+        // the forms are hidden but their listeners remain attached, so leaving
+        // `submitting` true is what actually blocks a queued second submit.
+        if (!done) {
+          submitting = false;
+          setBusy(false);
+          if (button) button.innerHTML = label;
+        }
       }
     });
   }

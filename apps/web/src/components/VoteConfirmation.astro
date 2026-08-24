@@ -1,0 +1,94 @@
+---
+import type { Candidate } from "@avs/shared";
+import { ROUTES } from "@avs/shared";
+
+interface Props {
+  /**
+   * Omitted when this is rendered as an empty shell for the client to fill —
+   * which is what index.astro does, so a successful vote can show the receipt
+   * without a page navigation.
+   */
+  candidate?: Candidate | null;
+}
+
+const { candidate = null } = Astro.props;
+
+// One component, two fill modes. thanks.astro passes a candidate and this
+// renders complete on the server; index.astro renders it hidden and empty, and
+// the submit handler populates [data-confirm-name] and [data-confirm-image]
+// from the card the voter just clicked — no extra request, because that data is
+// already on the page.
+//
+// The heading takes tabindex="-1" so the client path can move focus to it. A
+// silent DOM swap is invisible to a screen reader otherwise.
+---
+
+<header class="page-header">
+  <h1 id="confirmation-heading" tabindex="-1">Thank you for participating</h1>
+  <p>
+    Your vote for <strong data-confirm-name>{candidate?.name}</strong> has been recorded.
+  </p>
+</header>
+
+<div class="receipt">
+  <div class="receipt__media">
+    {/* src is left ABSENT rather than empty when there is no candidate: an
+        empty src resolves against the page URL and fires a wasted request. */}
+    <img
+      data-confirm-image
+      src={candidate?.imageUrl}
+      alt=""
+      width="800"
+      height="800"
+      decoding="async"
+    />
+  </div>
+  <p class="receipt__name" data-confirm-name>{candidate?.name}</p>
+  <p class="receipt__meta">Counted · one vote per person</p>
+</div>
+
+<p class="page-header" style="margin-top: var(--space-8)">
+  Results refresh every few minutes, so your vote may take a moment to show up in the totals.
+</p>
+
+<p class="footer-links">
+  <a class="btn btn--inline" href={ROUTES.results}>View the results</a>
+</p>
+
+<style>
+  .receipt {
+    width: min(100%, 320px);
+    margin: 0 auto;
+    padding: var(--space-4);
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    text-align: center;
+  }
+
+  .receipt__media {
+    aspect-ratio: 1 / 1;
+    overflow: hidden;
+    border-radius: var(--radius-sm);
+    background: var(--accent-soft);
+  }
+
+  .receipt__media img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .receipt__name {
+    margin: var(--space-4) 0 var(--space-1);
+    font-size: 1.1rem;
+    font-weight: 640;
+  }
+
+  .receipt__meta {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+  }
+</style>

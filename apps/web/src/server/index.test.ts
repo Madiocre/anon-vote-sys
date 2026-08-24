@@ -234,68 +234,37 @@ describe("POST /api/vote — JSON path", () => {
     expect(dbState.calls.recordVote).toBe(0);
   });
 
-  test("409s when the Durable Object gate refuses the claim", async () => {
-    const { env, voteGate } = makeEnv();
-    const returning = { [VOTER_COOKIE]: "voter-a" };
-
-    // First vote claims the gate for this voter id.
-    await app.fetch(jsonVote({ candidateId: VALID, turnstileToken: "tok" }, returning), env);
-    expect(voteGate.claimed.size).toBe(1);
-
-    // Same voter again, having somehow lost only the vote cookie.
-    const response = await app.fetch(
-      jsonVote({ candidateId: VALID, turnstileToken: "tok" }, returning),
-      env,
-    );
-
-    expect(response.status).toBe(409);
-    expect((await response.json()) as VoteResponse).toMatchObject({ error: "already_voted" });
-  });
-
-  test("the gate is keyed on voter id, so one IP does not lock out a second device", async () => {
-    // The vote-route half of the CGNAT fix. Keyed on ip_hash, the gate refused
-    // the second device on a shared address before D1 was ever consulted —
-    // which is why relaxing the database constraint alone would not have helped.
-    const { env, voteGate } = makeEnv();
+  test("two voters behind ONE IP can both vote", async () => {
+    // The vote-route half of the CGNAT fix. This used to be blocked twice over:
+    // by the UNIQUE index on ip_hash, and by a VoteGate claim keyed on ip_hash
+    // that refused the second device before D1 was ever consulted.
+    const { env } = makeEnv();
+    const SHARED_IP = "198.51.100.42";
 
     const first = await app.fetch(
-      jsonVote({ candidateId: VALID, turnstileToken: "tok" }, { [VOTER_COOKIE]: "laptop" }),
+      makeRequest("/api/vote", {
+        method: "POST",
+        ip: SHARED_IP,
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ candidateId: VALID, turnstileToken: "tok" }),
+        cookies: { [VOTER_COOKIE]: "laptop" },
+      }),
       env,
     );
     const second = await app.fetch(
-      jsonVote({ candidateId: VALID, turnstileToken: "tok" }, { [VOTER_COOKIE]: "phone" }),
+      makeRequest("/api/vote", {
+        method: "POST",
+        ip: SHARED_IP,
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ candidateId: VALID, turnstileToken: "tok" }),
+        cookies: { [VOTER_COOKIE]: "phone" },
+      }),
       env,
     );
 
     expect(first.status).toBe(201);
     expect(second.status).toBe(201);
-    expect(voteGate.claimed.size).toBe(2);
     expect(dbState.calls.recordVote).toBe(2);
-  });
-
-  test("hands the claim back when the D1 write fails", async () => {
-    // Without the release, a transient D1 error would leave that voter unable to
-    // ever vote: claim spent, no row written, every retry refused by a gate
-    // guarding a vote that was never cast.
-    const { env, voteGate } = makeEnv();
-    dbState.throwOn = "recordVote";
-
-    // app.onError logs the cause, which is correct in production and noise here.
-    const realError = console.error;
-    console.error = () => {};
-    let response: Response;
-    try {
-      response = await app.fetch(
-        jsonVote({ candidateId: VALID, turnstileToken: "tok" }, { [VOTER_COOKIE]: "voter-a" }),
-        env,
-      );
-    } finally {
-      console.error = realError;
-    }
-
-    expect(response.status).toBe(500);
-    expect(voteGate.released).toHaveLength(1);
-    expect(voteGate.claimed.size).toBe(0);
   });
 
   test("surfaces a D1 duplicate as already_voted with the earlier pick", async () => {
@@ -316,17 +285,17 @@ describe("POST /api/vote — JSON path", () => {
     expect(readSetCookies(response)[VOTE_COOKIE]).toBeTruthy();
   });
 
-  test("checks Turnstile before spending a Durable Object round trip", async () => {
-    // Ordering matters for cost: a request already doomed by a failed challenge
-    // must not claim the gate, or it would lock that voter out permanently.
+  test("checks Turnstile before writing to D1", async () => {
+    // Ordering matters: a request already doomed by a failed challenge must not
+    // reach the database.
     restoreFetch?.();
     const stub = stubFetch(turnstileResponder(false));
     restoreFetch = stub.restore;
 
-    const { env, voteGate } = makeEnv();
+    const { env } = makeEnv();
     await app.fetch(jsonVote({ candidateId: VALID, turnstileToken: "bad" }), env);
 
-    expect(voteGate.claimed.size).toBe(0);
+    expect(dbState.calls.recordVote).toBe(0);
   });
 });
 

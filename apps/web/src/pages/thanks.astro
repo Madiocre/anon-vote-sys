@@ -1,6 +1,6 @@
 ---
 import { getCachedCandidates } from "../server/lib/cache.ts";
-import { readVotedCandidateId } from "../server/lib/identity.ts";
+import { getVoterStatus, readVotedCandidateId, resolveIdentity } from "../server/lib/identity.ts";
 import { ROUTES } from "@avs/shared";
 
 import Layout from "../layouts/Layout.astro";
@@ -10,8 +10,22 @@ export const prerender = false;
 
 const ctx = cfContext(Astro.locals);
 
-// Cookie-only read: this page costs zero D1 queries beyond the cached candidate list.
-const votedFor = await readVotedCandidateId(Astro.request, env);
+// The signed vote cookie is the cheap path and answers most visits with zero D1
+// reads. But it is not the only way index.astro decides someone has voted, and
+// when the two disagreed this page contradicted the redirect that sent the
+// visitor here — "we don't see a vote from this browser", immediately after
+// being refused the ballot. That is what a voter whose vote cookie expired, or
+// was partially cleared, would see.
+//
+// So: fall back to the same check the ballot uses. Only on a cookie miss, so
+// the common case still costs nothing.
+let votedFor = await readVotedCandidateId(Astro.request, env);
+
+if (!votedFor) {
+  const identity = await resolveIdentity(Astro.request, env);
+  const status = await getVoterStatus(Astro.request, env, identity);
+  votedFor = status.candidateId;
+}
 
 let candidate = null;
 if (votedFor) {

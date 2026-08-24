@@ -104,13 +104,18 @@ export async function getVoterStatus(
     return { hasVoted: true, candidateId: token.c, reason: "cookie" };
   }
 
-  // Brand-new voter with a fresh IP hash derived from a just-minted uuid cannot
-  // have a row yet, so skip the query entirely.
-  if (identity.isNew && resolveClientIp(request) === null) {
+  // A just-minted voter id cannot have a row yet, so skip the query entirely.
+  //
+  // This used to also require `resolveClientIp(request) === null`, because the
+  // lookup matched on ip_hash too and a new voter could still collide with an
+  // existing row via a shared address. Now that the lookup is voter_id only,
+  // `isNew` alone is sufficient — which also means every first-time visitor
+  // costs zero D1 reads instead of one.
+  if (identity.isNew) {
     return { hasVoted: false, candidateId: null, reason: "none" };
   }
 
-  const existing = await findExistingVote(createDb(env.DB), identity.voterId, identity.ipHash);
+  const existing = await findExistingVote(createDb(env.DB), identity.voterId);
   if (!existing) return { hasVoted: false, candidateId: null, reason: "none" };
 
   return { hasVoted: true, candidateId: existing.candidateId, reason: existing.matchedOn };

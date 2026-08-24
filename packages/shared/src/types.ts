@@ -21,8 +21,15 @@ export interface ResultsPayload {
   ttlSeconds: number;
 }
 
-/** Why a voter is not allowed to vote again. */
-export type VoteBlockReason = "cookie" | "ip" | "none";
+/**
+ * Why a voter is not allowed to vote again.
+ *
+ * `"ip"` was removed along with IP-based dedup — a public IPv4 is not one
+ * person, so matching on it locked out everyone behind a shared address. See
+ * docs/vote-integrity.md. Identity now rests on the `vid` cookie alone, so the
+ * only reasons left are "we have a record for this voter" and "we do not".
+ */
+export type VoteBlockReason = "cookie" | "none";
 
 export interface VoterStatus {
   hasVoted: boolean;
@@ -49,6 +56,7 @@ export interface VoteFailure {
     | "unknown_candidate"
     | "invalid_request"
     | "verification_failed"
+    | "rate_limited"
     | "server_error";
   message: string;
   /** Present when the failure is `already_voted` and we know the earlier pick. */

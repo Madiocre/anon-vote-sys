@@ -31,20 +31,23 @@ export async function listCandidates(db: Database): Promise<Candidate[]> {
 }
 
 /**
- * Looks for an existing vote by either identifier. This is the fallback path used
- * when the signed vote cookie is missing (cleared, private window, new device).
+ * Looks for an existing vote by voter id. This is the fallback path used when
+ * the signed vote cookie is missing but the `vid` cookie survived — an expired
+ * vote token, or a partial cookie clear.
  *
- * B's raw SQL does this as one query with `ORDER BY CASE WHEN voter_id = ?1 THEN 0
- * ELSE 1 END` to prefer a voter_id match. Drizzle's query builder has no clean
- * equivalent to an inline CASE in ORDER BY, so this is two sequential queries
- * instead — voter_id first, ip_hash only if that misses. The extra round trip
- * only happens on this already-rare fallback path.
+ * It used to also match on ip_hash, which is what made a second device on one
+ * network read as a duplicate. That lookup is gone: a public IPv4 is not one
+ * person (docs/vote-integrity.md). ip_hash is still recorded, but only as a
+ * forensic signal — nothing on the request path reads it.
+ *
+ * The consequence, accepted deliberately: clearing the `vid` cookie yields a new
+ * identity and therefore a new vote. Preventing that needs an identity layer the
+ * project has ruled out.
  */
 export async function findExistingVote(
   db: Database,
   voterId: string,
-  ipHash: string,
-): Promise<{ candidateId: string; matchedOn: "cookie" | "ip" } | null> {
+): Promise<{ candidateId: string; matchedOn: "cookie" } | null> {
   const byVoterId = await db
     .select({ candidateId: votes.candidateId })
     .from(votes)
@@ -53,16 +56,6 @@ export async function findExistingVote(
 
   if (byVoterId[0]) {
     return { candidateId: byVoterId[0].candidateId, matchedOn: "cookie" };
-  }
-
-  const byIpHash = await db
-    .select({ candidateId: votes.candidateId })
-    .from(votes)
-    .where(eq(votes.ipHash, ipHash))
-    .limit(1);
-
-  if (byIpHash[0]) {
-    return { candidateId: byIpHash[0].candidateId, matchedOn: "ip" };
   }
 
   return null;
@@ -106,7 +99,9 @@ export async function recordVote(db: Database, input: RecordVoteInput): Promise<
 
   if (inserted.length > 0) return { status: "recorded" };
 
-  const existing = await findExistingVote(db, input.voterId, input.ipHash);
+  // Only voter_id is unique now, so a swallowed insert can only mean this voter
+  // already has a row — look it up to report which candidate they actually got.
+  const existing = await findExistingVote(db, input.voterId);
   return { status: "duplicate", candidateId: existing?.candidateId ?? input.candidateId };
 }
 

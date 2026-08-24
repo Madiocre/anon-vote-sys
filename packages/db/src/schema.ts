@@ -45,14 +45,25 @@ export const votes = sqliteTable(
       .$defaultFn(() => new Date()),
   },
   (t) => [
-    // These two UNIQUE indexes are the actual dedup mechanism. Doing the check
-    // as a constraint rather than a SELECT-then-INSERT means two concurrent
-    // requests from the same voter cannot both slip through: the loser gets a
-    // UNIQUE violation, which recordVote() translates into "duplicate".
-    // Deliberately two separate indexes, not one composite (voter_id, ip_hash) —
-    // either identifier alone is enough to block a second vote.
+    // voter_id is THE dedup mechanism. Enforcing it as a constraint rather than
+    // a SELECT-then-INSERT means two concurrent requests from one voter cannot
+    // both slip through: the loser gets a UNIQUE violation, which recordVote()
+    // translates into "duplicate".
     uniqueIndex("idx_votes_voter_id").on(t.voterId),
-    uniqueIndex("idx_votes_ip_hash").on(t.ipHash),
+
+    // ip_hash is deliberately NOT unique. It was, and that made a public IPv4
+    // address mean "one person" — which it is not. Carrier-grade NAT puts
+    // hundreds to thousands of mobile subscribers behind a single address, so a
+    // UNIQUE index here let the first voter on a carrier gateway lock out
+    // everyone behind it. See docs/vote-integrity.md for why no per-IP quota
+    // fixes this either.
+    //
+    // The column and index are kept because ip_hash is still recorded as a
+    // FORENSIC signal: after the fact, an ip_hash with thousands of votes is
+    // either a carrier gateway or a farm, and the two are distinguishable by
+    // how they spread across candidates and time. The index is what makes those
+    // grouping queries cheap. Nothing reads it on the request path.
+    index("idx_votes_ip_hash").on(t.ipHash),
     // Supports the GROUP BY in aggregateResults.
     index("idx_votes_candidate").on(t.candidateId),
   ],

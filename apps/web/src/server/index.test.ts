@@ -236,18 +236,66 @@ describe("POST /api/vote — JSON path", () => {
 
   test("409s when the Durable Object gate refuses the claim", async () => {
     const { env, voteGate } = makeEnv();
-    // First vote claims the gate for this ip_hash.
-    await app.fetch(jsonVote({ candidateId: VALID, turnstileToken: "tok" }), env);
+    const returning = { [VOTER_COOKIE]: "voter-a" };
+
+    // First vote claims the gate for this voter id.
+    await app.fetch(jsonVote({ candidateId: VALID, turnstileToken: "tok" }, returning), env);
     expect(voteGate.claimed.size).toBe(1);
 
-    // Second vote from the same IP, with no cookie carried over.
+    // Same voter again, having somehow lost only the vote cookie.
     const response = await app.fetch(
-      jsonVote({ candidateId: VALID, turnstileToken: "tok" }),
+      jsonVote({ candidateId: VALID, turnstileToken: "tok" }, returning),
       env,
     );
 
     expect(response.status).toBe(409);
     expect((await response.json()) as VoteResponse).toMatchObject({ error: "already_voted" });
+  });
+
+  test("the gate is keyed on voter id, so one IP does not lock out a second device", async () => {
+    // The vote-route half of the CGNAT fix. Keyed on ip_hash, the gate refused
+    // the second device on a shared address before D1 was ever consulted —
+    // which is why relaxing the database constraint alone would not have helped.
+    const { env, voteGate } = makeEnv();
+
+    const first = await app.fetch(
+      jsonVote({ candidateId: VALID, turnstileToken: "tok" }, { [VOTER_COOKIE]: "laptop" }),
+      env,
+    );
+    const second = await app.fetch(
+      jsonVote({ candidateId: VALID, turnstileToken: "tok" }, { [VOTER_COOKIE]: "phone" }),
+      env,
+    );
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect(voteGate.claimed.size).toBe(2);
+    expect(dbState.calls.recordVote).toBe(2);
+  });
+
+  test("hands the claim back when the D1 write fails", async () => {
+    // Without the release, a transient D1 error would leave that voter unable to
+    // ever vote: claim spent, no row written, every retry refused by a gate
+    // guarding a vote that was never cast.
+    const { env, voteGate } = makeEnv();
+    dbState.throwOn = "recordVote";
+
+    // app.onError logs the cause, which is correct in production and noise here.
+    const realError = console.error;
+    console.error = () => {};
+    let response: Response;
+    try {
+      response = await app.fetch(
+        jsonVote({ candidateId: VALID, turnstileToken: "tok" }, { [VOTER_COOKIE]: "voter-a" }),
+        env,
+      );
+    } finally {
+      console.error = realError;
+    }
+
+    expect(response.status).toBe(500);
+    expect(voteGate.released).toHaveLength(1);
+    expect(voteGate.claimed.size).toBe(0);
   });
 
   test("surfaces a D1 duplicate as already_voted with the earlier pick", async () => {

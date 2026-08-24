@@ -17,9 +17,12 @@ import type { Env } from "./env.ts";
 /** A DO stub that reproduces VoteGate's contract: first claim per id wins. */
 export function makeVoteGateNamespace() {
   const claimed = new Set<string>();
+  const released: string[] = [];
 
   return {
     claimed,
+    /** Ids whose claim was handed back — the D1-write-failed path. */
+    released,
     namespace: {
       idFromName: (name: string) => ({ name }),
       get: (id: { name: string }) => ({
@@ -27,6 +30,10 @@ export function makeVoteGateNamespace() {
           if (claimed.has(id.name)) return false;
           claimed.add(id.name);
           return true;
+        },
+        release: async (): Promise<void> => {
+          claimed.delete(id.name);
+          released.push(id.name);
         },
       }),
     },

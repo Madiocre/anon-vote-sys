@@ -67,12 +67,22 @@
 	// Rate limiting layer 1: native binding, scoped per Cloudflare
 	// location. Absorbs bursts at the edge before a DO round trip is paid for.
 	// `period` accepts only 10 or 60.
+	//
+	// This is keyed on ip_hash and is a FLOOD GUARD ONLY — it is not the
+	// per-voter budget, which lives on the RATE_LIMITER Durable Object keyed on
+	// voter_id (see src/server/middleware/rate-limit.ts).
+	//
+	// 300/min rather than the original 20/min because a public IPv4 is not one
+	// person: carrier-grade NAT puts hundreds to thousands of mobile subscribers
+	// behind one address. At 20/min a single carrier egress IP would 429 real
+	// voters continuously at peak. 300/min per IP per route is far above any
+	// plausible legitimate load from one address while still stopping a flood.
 	"ratelimits": [
 		{
 			"name": "EDGE_RATE_LIMITER",
 			"namespace_id": "1001",
 			"simple": {
-				"limit": 20,
+				"limit": 300,
 				"period": 60
 			}
 		}
@@ -135,8 +145,10 @@
 					// unique per ACCOUNT, not per Worker, so reusing it would make
 					// staging traffic count against production's limit.
 					"namespace_id": "1002",
+					// Matches production — flood guard only, not the per-voter
+					// budget. See the note on the production block above.
 					"simple": {
-						"limit": 20,
+						"limit": 300,
 						"period": 60
 					}
 				}

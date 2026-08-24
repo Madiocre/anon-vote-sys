@@ -14,6 +14,7 @@ before changing anything it covers.
 | [docs/images.md](docs/images.md) | Candidate images via jsDelivr: the public assets repo, why tags and never branches |
 | [docs/ci-pipeline.md](docs/ci-pipeline.md) | Cloudflare Workers Builds — build settings, the staging split, and why the environment is chosen at build time |
 | [docs/testing.md](docs/testing.md) | What the 87 server tests cover, what they deliberately do not, and how they run outside workerd |
+| [docs/vote-integrity.md](docs/vote-integrity.md) | What stops duplicate votes, why IP cannot be an enforcement key at scale, and what is still outstanding |
 | [docs/edgecases.md](docs/edgecases.md) | Adding and removing candidates, shared IPs, cleared cookies — the niche cases with destructive consequences |
 
 ## Layout

@@ -18,5 +18,5 @@ CREATE TABLE `votes` (
 --> statement-breakpoint
 CREATE INDEX `idx_candidates_sort` ON `candidates` (`sort_order`,`id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `idx_votes_voter_id` ON `votes` (`voter_id`);--> statement-breakpoint
-CREATE UNIQUE INDEX `idx_votes_ip_hash` ON `votes` (`ip_hash`);--> statement-breakpoint
+CREATE INDEX `idx_votes_ip_hash` ON `votes` (`ip_hash`);--> statement-breakpoint
 CREATE INDEX `idx_votes_candidate` ON `votes` (`candidate_id`);

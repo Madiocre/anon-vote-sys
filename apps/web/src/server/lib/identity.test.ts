@@ -167,8 +167,12 @@ describe("getVoterStatus", () => {
     expect(dbState.calls.findExistingVote).toBe(0);
   });
 
-  test("skips the query for a brand-new voter with no resolvable IP", async () => {
-    const request = makeRequest("/", { ip: "" });
+  test("skips the query entirely for a brand-new voter", async () => {
+    // A just-minted voter id cannot have a row, so no D1 read is needed. This
+    // used to additionally require the request to have no resolvable IP,
+    // because the lookup also matched ip_hash — now every first-time visitor
+    // costs zero reads, IP or not.
+    const request = makeRequest("/", { ip: "9.9.9.9" });
     const identity = await resolveIdentity(request, env);
 
     expect(await getVoterStatus(request, env, identity)).toEqual({
@@ -179,22 +183,46 @@ describe("getVoterStatus", () => {
     expect(dbState.calls.findExistingVote).toBe(0);
   });
 
-  test("falls back to D1 when the cookie is missing, reporting how it matched", async () => {
-    dbState.existingVote = { candidateId: "candidate-05", matchedOn: "ip" };
-    const request = makeRequest("/", { ip: "9.9.9.9" });
+  test("two first-time voters on ONE IP both read as not-voted", async () => {
+    // The status-level half of the CGNAT fix. Previously the second device
+    // behind a shared address matched the first one's row on ip_hash and was
+    // told it had already voted.
+    dbState.existingVote = { candidateId: "candidate-05", matchedOn: "cookie" };
+    const SHARED_IP = "198.51.100.42";
+
+    for (const voter of ["phone", "laptop"]) {
+      const request = makeRequest("/", { ip: SHARED_IP });
+      const identity = await resolveIdentity(request, env);
+      const status = await getVoterStatus(request, env, identity);
+
+      expect(status.hasVoted).toBe(false);
+      expect(`${voter}: no D1 read`).toBe(`${voter}: no D1 read`);
+    }
+    expect(dbState.calls.findExistingVote).toBe(0);
+  });
+
+  test("falls back to D1 for a known voter whose vote cookie is gone", async () => {
+    dbState.existingVote = { candidateId: "candidate-05", matchedOn: "cookie" };
+    const request = makeRequest("/", {
+      ip: "9.9.9.9",
+      cookies: { [VOTER_COOKIE]: "returning-voter" },
+    });
     const identity = await resolveIdentity(request, env);
 
     expect(await getVoterStatus(request, env, identity)).toEqual({
       hasVoted: true,
       candidateId: "candidate-05",
-      reason: "ip",
+      reason: "cookie",
     });
     expect(dbState.calls.findExistingVote).toBe(1);
   });
 
   test("reports not-voted when D1 has no row either", async () => {
     dbState.existingVote = null;
-    const request = makeRequest("/", { ip: "9.9.9.9" });
+    const request = makeRequest("/", {
+      ip: "9.9.9.9",
+      cookies: { [VOTER_COOKIE]: "returning-voter" },
+    });
     const identity = await resolveIdentity(request, env);
 
     expect(await getVoterStatus(request, env, identity)).toEqual({
@@ -209,7 +237,7 @@ describe("getVoterStatus", () => {
     dbState.existingVote = { candidateId: "candidate-01", matchedOn: "cookie" };
     const request = makeRequest("/", {
       ip: "9.9.9.9",
-      cookies: { [VOTE_COOKIE]: "forged.token" },
+      cookies: { [VOTER_COOKIE]: "returning-voter", [VOTE_COOKIE]: "forged.token" },
     });
     const identity = await resolveIdentity(request, env);
 

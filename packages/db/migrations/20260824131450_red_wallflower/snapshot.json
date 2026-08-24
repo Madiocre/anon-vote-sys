@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "c75ec3dc-bf81-47ed-a20f-34262f2f2f52",
+  "id": "81383686-9efd-4a9d-a370-a44c9ff90a7f",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
@@ -196,7 +196,7 @@
           "isExpression": false
         }
       ],
-      "isUnique": true,
+      "isUnique": false,
       "where": null,
       "origin": "manual",
       "name": "idx_votes_ip_hash",

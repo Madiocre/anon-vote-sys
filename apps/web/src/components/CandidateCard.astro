@@ -9,21 +9,14 @@ interface Props {
 
 const { candidate, eager = false } = Astro.props;
 
-// No Turnstile widget in this component, deliberately. There is exactly ONE for
-// the whole page (see index.astro) — rendering one per card meant twenty widgets
-// on a twenty-candidate ballot: visually awful, and twenty challenge instances
-// for a page where at most one vote is ever cast.
-//
 // The submit handler on index.astro mints a fresh token on demand and sends it
 // in the JSON body, so no token ever has to live inside this form.
-//
-// (Comments live here rather than in the markup on purpose: HTML comments in an
-// .astro template are emitted to the browser, frontmatter comments are not.)
 ---
 
-<li class="card">
+<li class="card" data-candidate-card>
   <div class="card__media">
     <img
+      data-candidate-image
       src={candidate.imageUrl}
       alt=""
       width="800"

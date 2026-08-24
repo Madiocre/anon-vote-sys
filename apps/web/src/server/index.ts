@@ -201,45 +201,22 @@ app.post("/api/vote", rateLimit({ route: "vote", limit: 5, windowMs: 60_000 }), 
     return json ? c.json(body, 400) : c.redirect(`${ROUTES.vote}?error=unknown_candidate`, 303);
   }
 
-  // Durable Object gate — the fast, globally-consistent first claim. Checked
-  // AFTER Turnstile deliberately: no reason to spend a DO round trip on a
-  // request that was already going to be rejected for an unrelated reason.
+  // The UNIQUE index on voter_id is the dedup mechanism, full stop.
   //
-  // Keyed on voter_id, NOT ip_hash. Keyed on ip_hash it was the single worst
-  // blocker in the system: the claim is permanent and per-instance
-  // undeletable, so the first voter on a carrier-NAT address locked out
-  // everyone behind it forever — and dropping the UNIQUE index alone would not
-  // have helped, because this check runs before D1 ever sees the insert.
-  const gate = c.env.VOTE_GATE.get(c.env.VOTE_GATE.idFromName(identity.voterId));
-  if (!(await gate.claim())) {
-    const body: VoteResponse = {
-      ok: false,
-      error: "already_voted",
-      message: "You've already voted.",
-    };
-    return json ? c.json(body, 409) : c.redirect(ROUTES.thanks, 303);
-  }
-
-  // The UNIQUE index on voter_id remains the actual source of truth — the DO
-  // claim above is a fast path in front of it, not a replacement.
-  let outcome;
-  try {
-    outcome = await recordVote(createDb(c.env.DB), {
-      id: crypto.randomUUID(),
-      candidateId,
-      voterId: identity.voterId,
-      ipHash: identity.ipHash,
-      userAgent: c.req.header("user-agent") ?? null,
-    });
-  } catch (error) {
-    // The claim is already spent at this point. Releasing it matters: without
-    // this, a transient D1 failure would leave the voter permanently unable to
-    // vote — gate claimed, no row written, and nothing to reconcile the two.
-    // Best-effort, because if the release also fails there is nothing further
-    // to do and the original error is the one worth surfacing.
-    await gate.release().catch(() => {});
-    throw error;
-  }
+  // A `VoteGate` Durable Object used to sit in front of this as a "fast first
+  // claim". It was removed: by the time execution reaches here, getVoterStatus
+  // has already established that D1 holds no row for this voter, so the only
+  // job left for the gate was the concurrent-double-submit race — which
+  // onConflictDoNothing already wins atomically, returning the same 409 with
+  // the candidate actually on record. It duplicated a constraint at the cost of
+  // half the app's Durable Object budget.
+  const outcome = await recordVote(createDb(c.env.DB), {
+    id: crypto.randomUUID(),
+    candidateId,
+    voterId: identity.voterId,
+    ipHash: identity.ipHash,
+    userAgent: c.req.header("user-agent") ?? null,
+  });
 
   const finalCandidateId = outcome.status === "recorded" ? candidateId : outcome.candidateId;
   await persistVoteCookies(c, identity.voterId, finalCandidateId);

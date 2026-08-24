@@ -12,10 +12,9 @@ One Worker, `anon-vote-sys`, containing everything:
 
 | Piece | What it is |
 | --- | --- |
-| `src/worker.ts` | The entrypoint. Re-exports both Durable Object classes and delegates HTTP to Astro's handler. |
+| `src/worker.ts` | The entrypoint. Re-exports the `RateLimiter` Durable Object and delegates HTTP to Astro's handler. |
 | Astro pages | `/` (ballot), `/results`, `/thanks` — all server-rendered. |
 | Hono app | Everything under `/api/*`, reached through `src/pages/api/[...route].ts`. |
-| `VoteGate` DO | One instance per voter `ip_hash`; first claim wins. |
 | `RateLimiter` DO | Fixed-window counter, one instance per `(ip_hash, route)`. |
 | Static assets | `dist/client` served through the `ASSETS` binding. |
 
@@ -129,10 +128,11 @@ Production values must differ from the ones in your local `.dev.vars` — that f
 is never read in production. Until all three are set, every request that needs one fails:
 `requireSecret()` throws, `app.onError` catches it, and the client gets a `server_error` JSON 500.
 
-> **`VOTE_SALT` must never be rotated once real voting starts.** It is the input to the `ip_hash`
-> (`apps/web/src/server/lib/identity.ts`), so changing it re-hashes every voter into a brand-new
-> identity — silently voiding IP-based dedup for everyone who already voted, and orphaning every
-> `VoteGate` claim. The one moment it is correct to rotate it is the pre-launch reset below.
+> **`VOTE_SALT` matters less than it used to, but still rotate it deliberately.** It is the input to
+> `ip_hash` (`apps/web/src/server/lib/identity.ts`). Since `ip_hash` is no longer an enforcement key —
+> only a forensic signal (see [vote-integrity.md](./vote-integrity.md)) — rotating it no longer voids
+> anyone's dedup. What it does destroy is the continuity of the forensic record: every voter re-hashes,
+> so before-and-after data cannot be correlated.
 
 ---
 
@@ -159,11 +159,13 @@ All candidates present, `totalVotes: 0`.
 
 Then in a browser:
 
-1. Load `/` — the Turnstile widget should render on every card.
-2. Cast a vote — you should land on `/thanks` with the candidate you picked.
+1. Load `/` — exactly ONE Turnstile widget for the whole page, not one per card, and normally
+   invisible (`appearance: "interaction-only"`).
+2. Cast a vote — the confirmation should appear **in place with no page navigation**, and the URL
+   should read `/thanks`. That inline swap is what keeps a vote to two Worker requests.
 3. Revisit `/` — should redirect to `/thanks` (answered from the cookie, no D1 read).
-4. Open `/` in a private window — should *also* redirect to `/thanks`, this time via the D1 lookup
-   on `ip_hash`. This is the check that proves dedup survives a cleared cookie.
+4. Open `/` in a private window — should show the **ballot**, not a redirect. A cleared cookie is a
+   new voter now that dedup is cookie-only; a second device on your network must be able to vote.
 
 ```bash
 wrangler d1 execute anon-vote-sys --remote --command "SELECT COUNT(*) FROM votes;"
@@ -175,30 +177,19 @@ Exactly 1.
 
 ## Reset before going public
 
-Your smoke-test vote leaves **two** traces, and deleting the obvious one is not enough:
-
-1. A row in `votes` — easy to delete.
-2. A permanent claim in the `VoteGate` Durable Object, keyed on your `ip_hash`. There is no
-   "delete this DO instance" command, and the claim never expires.
-
-Delete only the D1 row and that DO instance still holds a claim for your IP — you would be locked
-out of voting on your own poll, with no way to tell why.
-
-The clean reset is to delete the votes **and** rotate `VOTE_SALT`:
+This used to be genuinely dangerous: a `VoteGate` Durable Object held a permanent claim keyed on
+`ip_hash`, so clearing `votes` left you locked out of your own poll with no way to tell why. That
+class is gone, so a reset is now just the database:
 
 ```bash
 wrangler d1 execute anon-vote-sys --remote --command "DELETE FROM votes;"
 ```
 
-```bash
-cd apps/web && bun x wrangler secret put VOTE_SALT
-```
+Nothing else holds vote state. `RateLimiter` keeps only a short fixed window that expires on its own.
 
-Because `VoteGate` is addressed by `idFromName(ip_hash)` and `ip_hash` is derived from the salt, a
-new salt changes every key — the old claims become unreachable and every voter starts from a fresh
-instance. Same reasoning applies to `RateLimiter`, whose keys are also salt-derived.
-
-Do this as the **last** step before opening the poll, and never again afterwards.
+Rotating `VOTE_SALT` at the same time is optional now — it no longer releases anything, since
+`ip_hash` is not an enforcement key. Do it if you want the forensic record to start clean, and
+understand it makes before-and-after `ip_hash` values incomparable.
 
 ---
 

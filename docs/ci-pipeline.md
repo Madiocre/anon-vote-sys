@@ -38,8 +38,7 @@ missing D1 binding, an unmigrated database, an unset secret, a Worker that fails
 `imageUrl` that is not a resolvable URL. Phase two hits all of those, since it talks to a real
 deployment with real bindings.
 
-It is **read-only** on purpose — it never casts a vote. A vote from the runner would burn a
-`VoteGate` claim for the runner's IP, and those cannot be deleted.
+It is **read-only** on purpose — it never casts a vote, so CI never adds rows to a real tally.
 
 It also asserts there is **exactly one** Turnstile widget on the ballot, which is a regression guard
 for a real bug: the widget was originally rendered per candidate card, so a twenty-candidate ballot

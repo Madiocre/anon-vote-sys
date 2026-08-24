@@ -110,7 +110,15 @@ const checks: Check[] = [
       const forms = html.match(/data-vote-form/g)?.length ?? 0;
       if (forms === 0) throw new Error("no vote forms rendered");
 
-      return `${forms} vote forms, 1 Turnstile widget`;
+      // The ballot reveals this in place after a successful vote instead of
+      // navigating to /thanks — that is what keeps a vote to two Worker
+      // requests. If it stops being rendered, voting silently falls back to a
+      // full navigation and the request budget quietly goes back up by 50%.
+      if (!html.includes('id="vote-confirmation"')) {
+        throw new Error("inline confirmation section missing");
+      }
+
+      return `${forms} vote forms, 1 Turnstile widget, inline confirmation present`;
     },
   },
   {

@@ -13,8 +13,8 @@ bun run check
 ## How server tests run outside workerd
 
 The whole server suite runs in plain Bun, with no workerd and no miniflare. That works because
-**nothing in `src/server` imports a Durable Object class at runtime** — `env.ts` pulls in `VoteGate`
-and `RateLimiter` with `import type`, which `verbatimModuleSyntax` erases. So the Hono app and every
+**nothing in `src/server` imports a Durable Object class at runtime** — `env.ts` pulls in
+`RateLimiter` with `import type`, which `verbatimModuleSyntax` erases. So the Hono app and every
 lib module load normally, and only the *bindings* need faking.
 
 Hono helps here too: `app.fetch(request, env, ctx)` is the real entry point, so a test can drive the
@@ -52,8 +52,7 @@ The parts worth knowing are covered on purpose:
 - **Real D1 SQL.** The tests mock the `@avs/db` boundary, so the Drizzle query builder, the `LEFT
   JOIN`, the `ON CONFLICT` behaviour and the UNIQUE indexes are not exercised. Those need a real
   database.
-- **Durable Object storage.** `VoteGate` and `RateLimiter` are stubbed with equivalent behaviour,
-  not run. Their persistence, single-threading and per-colo identity are workerd properties.
+- **Durable Object storage.** `RateLimiter` is stubbed with equivalent behaviour, not run. Their persistence, single-threading and per-colo identity are workerd properties.
 - **The Workers Cache API.** `caches` is undefined in Bun, so `lib/cache.ts` takes its in-memory
   fallback — the same path `astro dev` uses. Real per-colo edge caching is untested.
 - **`.astro` files.** Not typechecked at all (TypeScript 7 blocks `astro check`); `astro build` is
@@ -75,8 +74,7 @@ It checks `/api/health`, `/api/candidates` (which proves the D1 binding resolves
 exists *and* it was seeded — three separate ways a deploy looks fine and is useless), `/api/results`,
 `/api/status` (which needs `COOKIE_SECRET` to be set), and that both pages render.
 
-It is **read-only** and never casts a vote: a vote from a CI runner would burn a `VoteGate` claim for
-that IP, and those cannot be deleted.
+It is **read-only** and never casts a vote, so CI never adds rows to a real tally.
 
 One assertion is a specific regression guard — the ballot must contain **exactly one** Turnstile
 widget. The widget was originally rendered inside each `CandidateCard`, so a twenty-candidate ballot

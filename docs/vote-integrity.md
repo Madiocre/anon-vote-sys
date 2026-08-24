@@ -129,11 +129,16 @@ changed together, because any one of them left alone would have kept the block i
 | --- | --- |
 | `uniqueIndex("idx_votes_ip_hash")` | plain `index(...)` — kept for forensic grouping only |
 | `findExistingVote(db, voterId, ipHash)` matched either | `findExistingVote(db, voterId)` — voter id only |
-| `VoteGate` keyed `idFromName(ip_hash)` | keyed `idFromName(voter_id)` |
+| `VoteGate` DO keyed `idFromName(ip_hash)` | **removed entirely** — see below |
 
-The `VoteGate` rekey was the one that mattered most. Its claim is permanent and per-instance
-undeletable, and it runs *before* D1 sees the insert — so relaxing the database constraint on its own
-would have changed nothing observable.
+`VoteGate` mattered most. Its claim was permanent, and it ran *before* D1 saw the insert — so
+relaxing the database constraint on its own would have changed nothing observable.
+
+It was then removed altogether rather than rekeyed. By the time execution reached it, `getVoterStatus`
+had already established D1 held no row for the voter, leaving it one job: the concurrent-double-submit
+race. `recordVote`'s `onConflictDoNothing` wins that race atomically and returns the same 409 with the
+candidate actually recorded. It duplicated the UNIQUE index at the cost of one DO request and one DO
+storage write per vote — half the app's entire Durable Object budget.
 
 Two smaller fixes rode along: `thanks.astro` now falls back to `getVoterStatus` on a cookie miss
 instead of contradicting the redirect that sent the visitor there, and a rate-limited request returns

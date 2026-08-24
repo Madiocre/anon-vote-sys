@@ -41,17 +41,17 @@ That cascade then propagates:
 - **`totalVotes` drops.** Percentages are computed as `votes / totalVotes` in `aggregateResults`, so
   *every remaining candidate's percentage silently increases.* Nobody gained votes; the denominator
   shrank. If anyone screenshotted the results page beforehand, the numbers will not reconcile.
-- **The voters are not released.** This is the part that surprises people. Their `votes` row is
-  gone, so the UNIQUE indexes on `voter_id` and `ip_hash` no longer block them — but two other
-  things still do:
-  - their signed `vote` cookie still decodes to the deleted candidate's id, so `getVoterStatus`
-    returns `hasVoted: true` from the cookie without ever consulting D1;
-  - their `VoteGate` Durable Object claim is still held, and **a DO claim cannot be deleted**.
+- **The voters are not released.** Their `votes` row is gone, so the UNIQUE index on `voter_id` no
+  longer blocks them — but their signed `vote` cookie still decodes to the deleted candidate's id,
+  and `getVoterStatus` answers from that cookie without ever consulting D1.
 
-  So those voters are locked out permanently: redirected to `/thanks`, unable to re-vote, and
-  `/thanks` cannot even name who they voted for because the candidate is no longer in the cached
-  list — they get the generic "Your vote has been recorded" instead. Their vote is gone and they
-  cannot cast another.
+  So those voters are stuck: redirected to `/thanks`, unable to re-vote, and `/thanks` cannot even
+  name who they voted for because the candidate is no longer in the cached list — they get the
+  generic "Your vote has been recorded" instead. Their vote is gone and they cannot cast another.
+
+  This used to be genuinely permanent, because a `VoteGate` Durable Object also held an undeletable
+  claim. That class has been removed, so the lockout now lives entirely in the cookie — which means
+  clearing cookies frees them. Recoverable, but only if they think to try.
 
 ### `--prune` is the loaded gun
 

@@ -20,6 +20,21 @@ export const candidates = sqliteTable(
     name: text("name").notNull(),
     imageUrl: text("image_url").notNull(),
     sortOrder: integer("sort_order").notNull().default(0),
+
+    /**
+     * Running tally, incremented by recordVote() as each vote lands.
+     *
+     * This exists because D1 bills rows *scanned*, not returned. Counting votes
+     * with a LEFT JOIN + GROUP BY walked every row in `votes` on every results
+     * computation — ~500k rows at full scale, against a 5M/day free budget that
+     * the per-colo cache multiplies rather than divides. Reading a column costs
+     * 20 rows instead.
+     *
+     * It is a cache, not the source of truth: `votes` still carries
+     * `candidate_id`, so this is always recomputable. See docs/vote-integrity.md.
+     */
+    voteCount: integer("vote_count").notNull().default(0),
+
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .$defaultFn(() => new Date()),
@@ -33,7 +48,21 @@ export const candidates = sqliteTable(
 export const votes = sqliteTable(
   "votes",
   {
-    id: text("id").primaryKey(),
+    /**
+     * INTEGER PRIMARY KEY, which SQLite aliases to the rowid — so it needs no
+     * index of its own.
+     *
+     * This was a `text` uuid, and that quietly cost a write on every vote:
+     * any non-INTEGER primary key gets its own `sqlite_autoindex_*` B-tree. The
+     * uuid earned nothing for it — grep the package and `votes.id` appears only
+     * in `.returning()` (to detect whether an insert landed) and `count()`.
+     * Never a lookup key, never exposed to a client.
+     *
+     * Deliberately NOT `{ autoIncrement: true }`: AUTOINCREMENT maintains a
+     * `sqlite_sequence` row, which would add back the write this removes.
+     */
+    id: integer("id").primaryKey(),
+
     candidateId: text("candidate_id")
       .notNull()
       .references(() => candidates.id, { onDelete: "cascade" }),
@@ -51,20 +80,24 @@ export const votes = sqliteTable(
     // translates into "duplicate".
     uniqueIndex("idx_votes_voter_id").on(t.voterId),
 
-    // ip_hash is deliberately NOT unique. It was, and that made a public IPv4
-    // address mean "one person" — which it is not. Carrier-grade NAT puts
-    // hundreds to thousands of mobile subscribers behind a single address, so a
-    // UNIQUE index here let the first voter on a carrier gateway lock out
-    // everyone behind it. See docs/vote-integrity.md for why no per-IP quota
-    // fixes this either.
+    // This is the ONLY index on votes, on purpose. Every index costs a write on
+    // every vote — D1 bills each index update as a row written — and at 100k
+    // writes/day on the free plan that is the difference between ~20,000 and
+    // ~33,000 votes per day.
     //
-    // The column and index are kept because ip_hash is still recorded as a
-    // FORENSIC signal: after the fact, an ip_hash with thousands of votes is
-    // either a carrier gateway or a farm, and the two are distinguishable by
-    // how they spread across candidates and time. The index is what makes those
-    // grouping queries cheap. Nothing reads it on the request path.
-    index("idx_votes_ip_hash").on(t.ipHash),
-    // Supports the GROUP BY in aggregateResults.
-    index("idx_votes_candidate").on(t.candidateId),
+    // Two were removed:
+    //
+    //   idx_votes_ip_hash    — ip_hash is forensic only; nothing reads it on the
+    //                          request path. Grouping by it after the fact scans
+    //                          the table once, which costs ~500k of a 5M daily
+    //                          read budget. Affordable as a one-off; not worth a
+    //                          write on every vote.
+    //
+    //   idx_votes_candidate  — existed for the LEFT JOIN in aggregateResults.
+    //                          That join is gone: results now read
+    //                          candidates.vote_count. Nothing joins votes any
+    //                          more except a deliberate recount.
+    //
+    // Both columns are still stored. Only their indexes are gone.
   ],
 );

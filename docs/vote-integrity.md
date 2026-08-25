@@ -127,7 +127,7 @@ changed together, because any one of them left alone would have kept the block i
 
 | Was | Now |
 | --- | --- |
-| `uniqueIndex("idx_votes_ip_hash")` | plain `index(...)` — kept for forensic grouping only |
+| `uniqueIndex("idx_votes_ip_hash")` | index removed entirely; the **column** is kept for forensics |
 | `findExistingVote(db, voterId, ipHash)` matched either | `findExistingVote(db, voterId)` — voter id only |
 | `VoteGate` DO keyed `idFromName(ip_hash)` | **removed entirely** — see below |
 
@@ -153,8 +153,7 @@ because the lookup matched `ip_hash` too.
 At the database level, against a freshly migrated local D1:
 
 ```
-idx_votes_ip_hash   unique: 0
-idx_votes_voter_id  unique: 1
+idx_votes_voter_id  unique: 1     <- the only index on votes
 ```
 
 Two rows with different `voter_id` and the *same* `ip_hash` both insert. A second row with a repeated
@@ -179,3 +178,60 @@ fix silently did nothing.
 The migration here was regenerated from scratch instead (safe, since the database was being reset
 anyway). **If you change an index's uniqueness again, diff the generated SQL before believing
 `generate` — a "nothing to migrate" result is not proof there was nothing to migrate.**
+
+
+## The results query, and why it stopped counting
+
+D1 bills rows **scanned**, not returned. The results aggregate used to be a `LEFT JOIN votes … GROUP
+BY … COUNT(votes.id)`, and `EXPLAIN QUERY PLAN` showed it walking every vote row per computation:
+
+```
+SEARCH v USING INDEX idx_votes_candidate (candidate_id=?) LEFT-JOIN
+```
+
+At ~500k votes that is ~500,000 rows read per computation, and the cache is **per colo**, so
+computations run at roughly `colos × 144/day`. Even one colo at a mid-poll average blows the 5M/day
+free read budget several times over. The free tier's read allowance is exhausted once `votes` holds
+tens of thousands of rows.
+
+`candidates.vote_count` replaces it. Results now read one row per candidate:
+
+```
+SCAN candidates
+USE TEMP B-TREE FOR ORDER BY
+```
+
+**A cron was considered and rejected.** It reduces how *often* the aggregate runs (`colos × 144` down
+to `144`) but not what each run costs, so ~36M rows/day remains far over budget. It also introduces a
+scheduled job that can fail silently and freeze the results, which a tally cannot do.
+
+### Writes came down too
+
+`votes` carried four indexes — three explicit plus a `sqlite_autoindex` created because `id` was a
+`text` primary key. Each index update is billed as a row written, so one vote cost five writes.
+
+`votes.id` is now an `INTEGER PRIMARY KEY`, which SQLite aliases to the rowid and needs no index; the
+uuid is gone entirely, since it was never a lookup key. `idx_votes_ip_hash` and `idx_votes_candidate`
+are dropped — the first was forensic only, the second existed for the join that no longer happens.
+
+One vote is now **1 row + 1 index + 1 tally update = 3 writes**, up from 5. That moves the D1 write
+ceiling from ~20,000 to ~33,000 votes/day.
+
+### The tally is a cache, and here is the recount
+
+`candidate_id` was deliberately kept on `votes`, so the tally is always recomputable and the
+"concentrated on one candidate" fraud signal survives. This must return zero rows:
+
+```sql
+SELECT c.id, c.vote_count, (SELECT COUNT(*) FROM votes v WHERE v.candidate_id = c.id) AS actual
+FROM candidates c
+WHERE c.vote_count <> (SELECT COUNT(*) FROM votes v WHERE v.candidate_id = c.id);
+```
+
+`recordVote` increments the tally as a second statement after the insert, not in one atomic batch:
+the increment must be conditional on the insert landing, and no single statement expresses that (an
+`EXISTS` on `voter_id` is true for the duplicate too). The failure mode is an under-count of one,
+repaired by recomputing from `votes`.
+
+**Anything that clears `votes` must also zero the tally.** `reset:local` does both; the production
+reset in [deployment.md](./deployment.md) does too.

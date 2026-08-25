@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "81383686-9efd-4a9d-a370-a44c9ff90a7f",
+  "id": "30a63963-5db0-4412-828c-fcd7d3210c07",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
@@ -58,6 +58,16 @@
       "type": "integer",
       "notNull": true,
       "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "vote_count",
+      "entityType": "columns",
+      "table": "candidates"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
       "default": null,
       "generated": null,
       "name": "created_at",
@@ -65,7 +75,7 @@
       "table": "candidates"
     },
     {
-      "type": "text",
+      "type": "integer",
       "notNull": false,
       "autoincrement": false,
       "default": null,
@@ -186,34 +196,6 @@
       "where": null,
       "origin": "manual",
       "name": "idx_votes_voter_id",
-      "entityType": "indexes",
-      "table": "votes"
-    },
-    {
-      "columns": [
-        {
-          "value": "ip_hash",
-          "isExpression": false
-        }
-      ],
-      "isUnique": false,
-      "where": null,
-      "origin": "manual",
-      "name": "idx_votes_ip_hash",
-      "entityType": "indexes",
-      "table": "votes"
-    },
-    {
-      "columns": [
-        {
-          "value": "candidate_id",
-          "isExpression": false
-        }
-      ],
-      "isUnique": false,
-      "where": null,
-      "origin": "manual",
-      "name": "idx_votes_candidate",
       "entityType": "indexes",
       "table": "votes"
     }

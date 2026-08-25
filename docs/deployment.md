@@ -182,10 +182,12 @@ This used to be genuinely dangerous: a `VoteGate` Durable Object held a permanen
 class is gone, so a reset is now just the database:
 
 ```bash
-wrangler d1 execute anon-vote-sys --remote --command "DELETE FROM votes;"
+wrangler d1 execute anon-vote-sys --remote --command "DELETE FROM votes; UPDATE candidates SET vote_count = 0;"
 ```
 
-Nothing else holds vote state. `RateLimiter` keeps only a short fixed window that expires on its own.
+**Both statements matter.** `candidates.vote_count` is a running tally kept by `recordVote()` — it is
+what the results page reads, so deleting rows from `votes` alone would leave the site reporting counts
+for votes that no longer exist. Nothing else holds vote state. `RateLimiter` keeps only a short fixed window that expires on its own.
 
 Rotating `VOTE_SALT` at the same time is optional now — it no longer releases anything, since
 `ip_hash` is not an enforcement key. Do it if you want the forensic record to start clean, and

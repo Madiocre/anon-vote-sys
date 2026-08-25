@@ -38,6 +38,10 @@ statement. There is no confirmation and no soft-delete.
 
 That cascade then propagates:
 
+- **The tally goes stale.** `candidates.vote_count` is maintained by `recordVote()`, and a cascade
+  delete does not decrement it. The deleted candidate's row goes with it, so their count disappears
+  cleanly — but if you delete vote rows any other way, re-zero and recount. See
+  [vote-integrity.md](./vote-integrity.md).
 - **`totalVotes` drops.** Percentages are computed as `votes / totalVotes` in `aggregateResults`, so
   *every remaining candidate's percentage silently increases.* Nobody gained votes; the denominator
   shrank. If anyone screenshotted the results page beforehand, the numbers will not reconcile.
@@ -82,8 +86,8 @@ of preference:
    tombstone candidate (`UPDATE votes SET candidate_id = 'withdrawn' WHERE candidate_id = '…'`)
    before removing the original. Totals stay honest and no voter is orphaned.
 3. **Accept it and restart the poll.** If the result is already compromised, a clean restart — wipe
-   `votes`, rotate `VOTE_SALT` to release every DO claim (see [deployment.md](./deployment.md)) — is
-   more defensible than publishing numbers that quietly changed.
+   `votes` *and* zero `vote_count` (see [deployment.md](./deployment.md)) — is more defensible than
+   publishing numbers that quietly changed.
 
 Whatever you choose, **export first**:
 
@@ -102,27 +106,35 @@ the poll opens.
 
 ## A voter clears their cookies
 
-Handled, and worth knowing why. `getVoterStatus` falls back to a D1 lookup on `ip_hash` when the
-cookie is missing, so they are still recognised and redirected to `/thanks`. They will not be told
-*who* they voted for — that lives only in the signed cookie they just deleted — so the page shows the
-generic acknowledgement.
+**They can vote again.** This is the accepted cost of dropping IP enforcement, not an oversight.
+
+Identity is the `vid` cookie alone: `getVoterStatus` reads the signed vote cookie, and on a miss
+looks up `voter_id` in D1. Clear the cookies and you are a new voter with a new uuid, so nothing
+matches. It used to also match on `ip_hash`, which is exactly what locked out second devices on a
+shared network.
+
+Partial clears behave differently and better: someone who loses only the `vote` cookie but keeps
+`vid` is still recognised via the D1 lookup, and lands on `/thanks`.
+
+See [vote-integrity.md](./vote-integrity.md) for why no amount of tuning recovers this without an
+identity layer, and why detection after the fact is the defence instead.
 
 ## Two people behind one IP
 
-They share an `ip_hash`, so **the second person cannot vote.** This is a deliberate trade: the
-`ip_hash` UNIQUE index is what stops one person voting repeatedly from private windows, and it cannot
-distinguish that from a household, an office, or a phone on carrier-grade NAT.
+**Both can vote.** This was the bug that prompted the whole dedup rework — a phone on the same wifi as
+an already-voted laptop was refused, because `ip_hash` carried a UNIQUE index and `findExistingVote`
+matched on it.
 
-If the poll's audience is likely to share IPs, this is the constraint to revisit before launch, not
-after. Dropping the `idx_votes_ip_hash` unique index and relying on cookies plus Turnstile alone is
-the lever — it trades dedup strength for reach.
+Carrier-grade NAT puts hundreds to thousands of mobile subscribers behind one public IPv4, so at
+country scale that rejected real voters in large numbers. `ip_hash` is still recorded, but purely as a
+forensic signal — nothing reads it on the request path.
 
 ## Local dev has no IP
 
 `computeIpHash` falls back to hashing the *voter id* when no client IP resolves, which is the case
-over localhost. Without that fallback every local request would collapse onto one shared hash and
-lock the whole machine out after the first vote. It means local dedup is cookie-based only, so
-clearing cookies locally lets you vote again — that is expected, and not what production does.
+over localhost. This matters much less than it used to, now that `ip_hash` is not an enforcement key —
+it only keeps the forensic column meaningful rather than constant. Local dedup is cookie-based, same
+as production.
 
 ## The results page shows stale numbers
 
@@ -134,9 +146,13 @@ purge it. The page's "Updated X ago / Next refresh in Y min" line is driven by t
 
 ## A rate-limited voter
 
-`/api/vote` allows 5 attempts per minute per identity, `/api/status` 30. Exceeding either returns a
-plain `429` with no JSON body — the ballot's fetch handler treats a non-OK response without a
-parseable body as a generic failure and shows "Your vote could not be recorded. Please try again."
+`/api/vote` allows 5 attempts per minute **per voter**, `/api/status` 30. The budget is keyed on
+`voter_id`, not `ip_hash` — keyed on IP, six people voting in the same minute from one carrier gateway
+started returning 429 to legitimate voters.
 
-That message is misleading for a rate limit but harmless, since waiting is the correct action
-either way. Worth improving if it ever shows up in real usage.
+Exceeding it returns a `429` carrying a `rate_limited` JSON body, so the ballot shows "Too many
+attempts in a short time. Wait a moment and try again." It used to be bare text, which the fetch
+handler could not parse, so a rate-limited voter was told their vote "could not be recorded" and to
+try again — the one action guaranteed not to work.
+
+A separate, much higher per-IP ceiling (300/min) still sits at the edge as a flood guard.

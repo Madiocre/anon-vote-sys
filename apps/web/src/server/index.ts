@@ -211,7 +211,6 @@ app.post("/api/vote", rateLimit({ route: "vote", limit: 5, windowMs: 60_000 }), 
   // the candidate actually on record. It duplicated a constraint at the cost of
   // half the app's Durable Object budget.
   const outcome = await recordVote(createDb(c.env.DB), {
-    id: crypto.randomUUID(),
     candidateId,
     voterId: identity.voterId,
     ipHash: identity.ipHash,

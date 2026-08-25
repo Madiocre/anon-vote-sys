@@ -157,14 +157,18 @@ describe("POST /api/vote — JSON path", () => {
     expect(dbState.calls.recordVote).toBe(1);
   });
 
-  test("passes a uuid and the user agent through to the insert", async () => {
+  test("passes the identity and user agent through to the insert", async () => {
     const { env } = makeEnv();
     await app.fetch(jsonVote({ candidateId: VALID, turnstileToken: "tok" }), env);
 
     expect(dbState.lastRecordedVote).toMatchObject({ candidateId: VALID });
-    const recorded = dbState.lastRecordedVote as { id: string; ipHash: string };
-    expect(recorded.id).toMatch(/^[0-9a-f-]{36}$/);
+    const recorded = dbState.lastRecordedVote as Record<string, unknown>;
     expect(recorded.ipHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(recorded.voterId).toBeTruthy();
+
+    // No id is supplied any more: votes.id is an INTEGER PRIMARY KEY, so SQLite
+    // assigns the rowid and no index write is paid for it.
+    expect(recorded).not.toHaveProperty("id");
   });
 
   test("rejects a missing candidateId with invalid_request", async () => {

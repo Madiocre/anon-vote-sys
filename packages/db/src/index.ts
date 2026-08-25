@@ -1,5 +1,5 @@
 import { drizzle, type AnyD1Database } from "drizzle-orm/d1";
-import { eq, count, desc, asc } from "drizzle-orm";
+import { eq, desc, asc, sql } from "drizzle-orm";
 import type { Candidate, CandidateResult, ResultsPayload } from "@avs/shared";
 
 import { candidates, votes } from "./schema";
@@ -62,7 +62,6 @@ export async function findExistingVote(
 }
 
 export interface RecordVoteInput {
-  id: string;
   candidateId: string;
   voterId: string;
   ipHash: string;
@@ -74,8 +73,8 @@ export type RecordVoteOutcome =
   | { status: "duplicate"; candidateId: string };
 
 /**
- * Inserts the vote, relying on the UNIQUE indexes on voter_id and ip_hash rather
- * than a read-then-write. onConflictDoNothing() covers only uniqueness, so a bad
+ * Inserts the vote, relying on the UNIQUE index on voter_id rather than a
+ * read-then-write. onConflictDoNothing() covers only uniqueness, so a bad
  * candidate_id still raises a foreign-key error instead of being mistaken for a
  * duplicate.
  *
@@ -83,12 +82,14 @@ export type RecordVoteOutcome =
  * result — that keeps this correct regardless of exactly how the installed
  * drizzle-orm/d1 version shapes its result metadata. An empty returned array
  * means the UNIQUE constraint silently absorbed the insert.
+ *
+ * `id` is not supplied: it is an INTEGER PRIMARY KEY, so SQLite assigns the
+ * rowid and no index write is paid for it.
  */
 export async function recordVote(db: Database, input: RecordVoteInput): Promise<RecordVoteOutcome> {
   const inserted = await db
     .insert(votes)
     .values({
-      id: input.id,
       candidateId: input.candidateId,
       voterId: input.voterId,
       ipHash: input.ipHash,
@@ -97,17 +98,43 @@ export async function recordVote(db: Database, input: RecordVoteInput): Promise<
     .onConflictDoNothing()
     .returning({ id: votes.id });
 
-  if (inserted.length > 0) return { status: "recorded" };
+  if (inserted.length === 0) {
+    // Only voter_id is unique, so a swallowed insert can only mean this voter
+    // already has a row — look it up to report which candidate they actually got.
+    const existing = await findExistingVote(db, input.voterId);
+    return { status: "duplicate", candidateId: existing?.candidateId ?? input.candidateId };
+  }
 
-  // Only voter_id is unique now, so a swallowed insert can only mean this voter
-  // already has a row — look it up to report which candidate they actually got.
-  const existing = await findExistingVote(db, input.voterId);
-  return { status: "duplicate", candidateId: existing?.candidateId ?? input.candidateId };
+  // Increment the tally that aggregateResults reads, so results never have to
+  // count rows. Deliberately a second statement rather than one batch: the
+  // increment must be conditional on the insert having landed, and no single
+  // statement expresses that — an EXISTS on voter_id is true for the duplicate
+  // too. An AFTER INSERT trigger would be atomic, but it is invisible to
+  // Drizzle's schema and a future `drizzle-kit generate` would silently drop it.
+  //
+  // Worst case here is an under-count of one if this fails after the insert
+  // succeeded. That is repairable precisely because votes still carries
+  // candidate_id — see the recount query in docs/vote-integrity.md.
+  await db
+    .update(candidates)
+    .set({ voteCount: sql`${candidates.voteCount} + 1` })
+    .where(eq(candidates.id, input.candidateId));
+
+  return { status: "recorded" };
 }
 
 /**
- * The one query the results page is built on. leftJoin so candidates with zero
- * votes still appear.
+ * The one query the results page is built on — now a plain read of one row per
+ * candidate. No join, no GROUP BY, no scan of `votes`.
+ *
+ * It used to be `LEFT JOIN votes … GROUP BY … COUNT(votes.id)`, which is where
+ * the cost was: D1 bills rows *scanned*, so counting walked every vote row on
+ * every computation. At ~500k votes and a per-colo cache that recomputes
+ * (colos × 144) times a day, that ran tens of millions of rows against a 5M/day
+ * free budget. Reading `vote_count` costs one row per candidate.
+ *
+ * Candidates with zero votes still appear, which the leftJoin used to guarantee
+ * and the default of 0 now does.
  */
 export async function aggregateResults(db: Database, ttlSeconds: number): Promise<ResultsPayload> {
   const rows = await db
@@ -116,12 +143,10 @@ export async function aggregateResults(db: Database, ttlSeconds: number): Promis
       name: candidates.name,
       imageUrl: candidates.imageUrl,
       sortOrder: candidates.sortOrder,
-      votes: count(votes.id),
+      votes: candidates.voteCount,
     })
     .from(candidates)
-    .leftJoin(votes, eq(votes.candidateId, candidates.id))
-    .groupBy(candidates.id, candidates.name, candidates.imageUrl, candidates.sortOrder)
-    .orderBy(desc(count(votes.id)), asc(candidates.sortOrder), asc(candidates.name));
+    .orderBy(desc(candidates.voteCount), asc(candidates.sortOrder), asc(candidates.name));
 
   const totalVotes = rows.reduce((sum, row) => sum + row.votes, 0);
 

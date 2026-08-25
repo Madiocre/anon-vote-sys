@@ -28,7 +28,10 @@ const proc = Bun.spawnSync({
     "--config",
     WRANGLER_CONFIG,
     "--command",
-    "DELETE FROM votes;",
+    // Both statements, always. candidates.vote_count is a running tally kept by
+    // recordVote(), so deleting rows from `votes` alone would leave the results
+    // page reporting counts for votes that no longer exist.
+    "DELETE FROM votes; UPDATE candidates SET vote_count = 0;",
   ],
   cwd: PKG_ROOT,
   stdio: ["inherit", "inherit", "inherit"],
@@ -36,5 +39,5 @@ const proc = Bun.spawnSync({
 
 if (proc.exitCode !== 0) process.exit(proc.exitCode ?? 1);
 
-console.log("Local votes cleared. Candidates left intact.");
+console.log("Local votes cleared and tallies zeroed. Candidates left intact.");
 console.log("Your browser still holds a vote cookie — clear it or use a private window.");

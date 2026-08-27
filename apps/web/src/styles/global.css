@@ -30,8 +30,23 @@
   color-scheme: light;
 }
 
+/*
+ * THEME RESOLUTION, in order:
+ *
+ *   1. :root above            light, the default
+ *   2. the media query below  dark, when the OS says so AND the user has not
+ *                             explicitly chosen light
+ *   3. [data-theme="..."]     an explicit choice, which beats both
+ *
+ * The media query is guarded with :not([data-theme="light"]) so that picking
+ * light on a machine set to dark actually stays light — without the guard the
+ * OS preference would re-darken it and the button would look broken.
+ *
+ * "auto" is represented by the ABSENCE of data-theme, which is why the toggle
+ * removes the attribute rather than setting it to "auto".
+ */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #161513;
     --bg-raised: #201e1b;
     --border: #322f2b;
@@ -47,6 +62,34 @@
 
     color-scheme: dark;
   }
+}
+
+/* Explicit dark — set by the toggle, wins over the OS preference either way. */
+:root[data-theme="dark"] {
+  --bg: #161513;
+  --bg-raised: #201e1b;
+  --border: #322f2b;
+  --border-strong: #46423c;
+  --text: #f1eee9;
+  --text-muted: #a29a8f;
+  --accent: #e8863f;
+  --accent-text: #1c1409;
+  --accent-soft: #33241a;
+  --ring: rgba(232, 134, 63, 0.4);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-lift: 0 2px 4px rgba(0, 0, 0, 0.45), 0 16px 40px rgba(0, 0, 0, 0.45);
+
+  color-scheme: dark;
+}
+
+/*
+ * Explicit light. Needed as its own block rather than relying on the :root
+ * defaults: without it, a user on a dark-set OS who picks light would get the
+ * light tokens from :root but keep `color-scheme: dark`, so scrollbars and form
+ * controls would stay dark against a light page.
+ */
+:root[data-theme="light"] {
+  color-scheme: light;
 }
 
 *,
@@ -90,7 +133,261 @@ button {
   border-radius: var(--radius-sm);
 }
 
+/* ==========================================================================
+   Background layers
+   --------------------------------------------------------------------------
+   Three stacking levels, and the order is load-bearing:
+
+     #bg-lines   z-index 0   drifting lines
+     #bg-lens    z-index 1   cursor lens, distorts everything BELOW it
+     .shell      z-index 2   page content
+
+   The lens sitting below .shell is what guarantees it can never distort a
+   card. That is a property of the layout rather than of the filter, so it
+   cannot regress by tweaking the filter later.
+
+   Note these are z-index 0 and 1, not -1. `body` paints `background: var(--bg)`,
+   so anything on a negative layer renders behind it and is never seen.
+   ========================================================================== */
+
+#bg-shapes,
+#bg-lines {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  /* Isolates layout/paint so the animating children cannot invalidate the page. */
+  contain: strict;
+}
+
+/* --- Halftone geometry ---------------------------------------------------
+   Each shape is one element doing two jobs: a repeating radial-gradient paints
+   the dot field, and border-radius or clip-path cuts it to shape. No images and
+   no extra requests.
+
+   "Semi-static" is taken literally — these drift over 2–4 minutes, slow enough
+   to read as a fixed backdrop while never sitting in exactly the same place.
+   -------------------------------------------------------------------------- */
+.bg-shape {
+  position: absolute;
+  /* The dot field. Sized independently of the shape, so every shape shares one
+     consistent dot rhythm rather than scaling its dots with its own box. */
+  background-image: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--accent) 55%, transparent) 3px,
+    transparent 1.5px
+  );
+  background-size: 13px 13px;
+  opacity: 0.24;
+  animation: bg-shape-drift var(--dur, 160s) ease-in-out var(--delay, 0s) infinite alternate;
+  will-change: transform;
+}
+
+.bg-shape--circle {
+  border-radius: 50%;
+}
+
+.bg-shape--triangle {
+  clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
+}
+
+.bg-shape--square {
+  border-radius: var(--radius);
+}
+
+/* Hand-placed: pushed toward the edges so the centre column stays readable. */
+.bg-shape:nth-child(1) {
+  top: -8%;
+  left: -6%;
+  width: 30rem;
+  height: 30rem;
+  --dur: 190s;
+}
+
+.bg-shape:nth-child(2) {
+  top: 12%;
+  right: -8%;
+  width: 26rem;
+  height: 26rem;
+  --dur: 220s;
+  --delay: -40s;
+}
+
+.bg-shape:nth-child(3) {
+  bottom: -10%;
+  left: 8%;
+  width: 22rem;
+  height: 22rem;
+  rotate: 18deg;
+  --dur: 170s;
+  --delay: -80s;
+}
+
+.bg-shape:nth-child(4) {
+  bottom: 4%;
+  right: 4%;
+  width: 18rem;
+  height: 18rem;
+  --dur: 240s;
+  --delay: -20s;
+}
+
+.bg-shape:nth-child(5) {
+  top: 46%;
+  left: -12%;
+  width: 20rem;
+  height: 20rem;
+  rotate: 200deg;
+  --dur: 200s;
+  --delay: -110s;
+}
+
+.bg-shape:nth-child(6) {
+  top: 60%;
+  right: 14%;
+  width: 14rem;
+  height: 14rem;
+  rotate: -12deg;
+  --dur: 260s;
+  --delay: -60s;
+}
+
+.bg-shape:nth-child(7) {
+  top: 50%;
+  right: 50%;
+  width: 14rem;
+  height: 14rem;
+  rotate: 50deg;
+  --dur: 140s;
+  --delay: -80s;
+}
+
+.bg-shape:nth-child(8) {
+  top: 20%;
+  right: 54%;
+  width: 14rem;
+  height: 14rem;
+  rotate: 90deg;
+  --dur: 100s;
+  --delay: -40s;
+}
+
+@keyframes bg-shape-drift {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(2.5rem, -1.75rem, 0) scale(1.07);
+  }
+}
+
+.bg-line {
+  position: absolute;
+  top: var(--top);
+  left: -30%;
+  width: 160%;
+  height: 2px;
+  transform-origin: center;
+  /* color-mix keeps the lines tied to the palette, so they re-tint with the
+     theme instead of being a hardcoded colour that only suits one of them. */
+  background: linear-gradient(
+    to right,
+    transparent,
+    color-mix(in srgb, var(--accent) 38%, transparent),
+    transparent
+  );
+  opacity: 0;
+  animation: bg-line-drift var(--dur) linear var(--delay) infinite;
+  will-change: transform, opacity;
+}
+
+/* transform and opacity only — both composite on the GPU and skip layout. */
+@keyframes bg-line-drift {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -12vh, 0) rotate(0deg) scaleX(var(--scale));
+  }
+  10%,
+  90% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--drift), 112vh, 0) rotate(var(--tilt)) scaleX(var(--scale));
+  }
+}
+
+#bg-lens {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  width: 22rem;
+  height: 22rem;
+  pointer-events: none;
+  /* Off-screen until the first pointer event supplies real coordinates. */
+  translate: calc(var(--mx, -999) * 1px - 50%) calc(var(--my, -999) * 1px - 50%);
+  backdrop-filter: blur(5px) hue-rotate(22deg) contrast(1.12) saturate(1.2);
+  /* The soft edge is what makes this read as a lens rather than a hard disc. */
+  mask-image: radial-gradient(circle closest-side, #000 35%, transparent 72%);
+  opacity: 0;
+}
+
+/* Only shown once the script confirms a real pointer and binds the listener. */
+:root[data-lens="on"] #bg-lens {
+  opacity: 1;
+}
+
+#theme-toggle {
+  position: fixed;
+  top: var(--space-4);
+  right: var(--space-4);
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  transition: color 150ms ease, border-color 150ms ease, transform 150ms ease;
+}
+
+#theme-toggle:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+#theme-toggle:active {
+  transform: translateY(1px);
+}
+
+/* One element, three glyphs, swapped by the data-state the script maintains. */
+.theme-toggle__icon::before {
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+#theme-toggle[data-state="auto"] .theme-toggle__icon::before {
+  content: "◐";
+}
+
+#theme-toggle[data-state="light"] .theme-toggle__icon::before {
+  content: "☀";
+}
+
+#theme-toggle[data-state="dark"] .theme-toggle__icon::before {
+  content: "☾";
+}
+
 .shell {
+  position: relative;
+  z-index: 2;
   width: min(100% - 2rem, 1600px);
   margin-inline: auto;
   padding-block: var(--space-8) var(--space-10);
@@ -149,7 +446,9 @@ button {
   }
 }
 
+/* --- Card interaction ----------------------------------------------------*/
 .card {
+  position: relative;
   display: flex;
   flex-direction: column;
   background: var(--bg-raised);
@@ -157,12 +456,83 @@ button {
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   overflow: hidden;
+
+  /* The two stages use SEPARATE properties — `translate` and `scale` — rather
+     than one `transform`. That is the whole trick: `transform` is a single
+     property and cannot carry two different delays, so lift and grow have to be
+     independently animatable to have independent timing. */
+  translate: 0 0;
+  scale: 1;
+  transition:
+    translate 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    scale 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 200ms ease,
+    border-color 200ms ease;
+  /* Base rule: everything collapses immediately when the pointer leaves. */
+  transition-delay: 0s;
+}
+
+.card:hover,
+.card:focus-within {
+  translate: 0 -4px;
+  scale: 1.15;
+  box-shadow: var(--shadow-lift);
+  border-color: var(--accent);
+  /* Raised so the grown card overlaps its neighbours rather than being clipped
+     under the next row. */
+  z-index: 5;
+
+  /* Order matches the transition list: translate, scale, box-shadow, border.
+     Only `scale` waits 3s — that is the dwell. The delay lives here and not on
+     the base rule, so leaving the card collapses it at once instead of hanging
+     open for three seconds. */
+  transition-delay: 0s, 1s, 0s, 0s;
 }
 
 .card__media {
+  position: relative;
   aspect-ratio: 1 / 1;
   background: var(--accent-soft);
   overflow: hidden;
+}
+
+/* Slides up over the image on the same 3s dwell as the scale.
+   Absolutely positioned so revealing it changes no layout — a grid row will not
+   resize and the other cards do not move. */
+.card__details {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  padding: var(--space-3) var(--space-4);
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--bg-raised) 92%, transparent),
+    color-mix(in srgb, var(--bg-raised) 72%, transparent) 70%,
+    transparent
+  );
+  color: var(--text);
+  font-size: 0.85rem;
+  line-height: 1.45;
+  text-wrap: pretty;
+  opacity: 0;
+  translate: 0 100%;
+  transition:
+    opacity 260ms ease,
+    translate 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition-delay: 0s;
+}
+
+.card:hover .card__details,
+.card:focus-within .card__details {
+  opacity: 1;
+  translate: 0 0;
+  transition-delay: 3s;
+}
+
+@supports (backdrop-filter: blur(4px)) {
+  .card__details {
+    backdrop-filter: blur(4px);
+  }
 }
 
 .card__media img {
@@ -300,5 +670,31 @@ button {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+
+  /*
+   * The blanket rule above already stops the lines — but only incidentally, by
+   * running the animation once in 0.01ms so it lands on its final keyframe.
+   * Hiding both layers outright is the actual intent, and it does not depend on
+   * where a keyframe happens to end. The lens is also skipped in JS, so this is
+   * belt-and-braces for it.
+   */
+  #bg-shapes,
+  #bg-lines,
+  #bg-lens {
+    display: none !important;
+  }
+
+  /*
+   * The blanket rule collapses transition-duration but leaves transition-delay
+   * alone, so without this the card would still sit still for 3s and then snap.
+   * Reduced motion should mean the detail appears at once, not after a wait
+   * with no animation to explain it.
+   */
+  .card:hover,
+  .card:focus-within,
+  .card:hover .card__details,
+  .card:focus-within .card__details {
+    transition-delay: 0s !important;
   }
 }

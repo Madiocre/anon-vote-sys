@@ -10,6 +10,25 @@ interface Props {
 
 const { title, description = "An anonymous, one-vote-per-person public poll.", noIndex = false } =
   Astro.props;
+
+// Background lines, randomised per render rather than staggered with :nth-child.
+//
+// nth-child gives one fixed arrangement that replays identically on every visit.
+// Generating here means each load genuinely differs — the pages already send
+// `cache-control: no-store`, so nothing caches the arrangement anyway.
+//
+// The negative delay is the important part: it starts each line partway through
+// its cycle, so they are already scattered on first paint instead of all
+// marching in from one edge together.
+const LINE_COUNT = 14;
+const lines = Array.from({ length: LINE_COUNT }, () => ({
+  top: +(Math.random() * 108 - 4).toFixed(2),
+  duration: +(18 + Math.random() * 26).toFixed(2),
+  delay: +(Math.random() * 40).toFixed(2),
+  tilt: +(Math.random() * 60 - 30).toFixed(2),
+  drift: +(Math.random() * 160 - 80).toFixed(0),
+  scale: +(0.55 + Math.random() * 0.65).toFixed(2),
+}));
 ---
 
 <html lang="en">
@@ -21,10 +40,179 @@ const { title, description = "An anonymous, one-vote-per-person public poll.", n
     <meta name="color-scheme" content="light dark" />
     {noIndex && <meta name="robots" content="noindex" />}
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+
+    {/*
+      Must be inline, in <head>, and NOT deferred. Anything that runs after first
+      paint shows the wrong palette for a frame and flashes. "auto" writes no
+      attribute at all, leaving the prefers-color-scheme media query in charge.
+    */}
+    <script is:inline>
+      try {
+        const stored = localStorage.getItem("theme");
+        if (stored === "light" || stored === "dark") {
+          document.documentElement.dataset.theme = stored;
+        }
+      } catch {
+        /* Private mode or blocked storage — fall through to the OS preference. */
+      }
+    </script>
   </head>
+
   <body>
+    {/*
+      Layer 0. Sits above body's background but below everything else. Not
+      z-index:-1 — body paints `background: var(--bg)`, so a negative layer would
+      render behind it and never be seen.
+    */}
+    {/*
+      Layer 0a. Large halftone geometry — circles, squares, triangles filled
+      with a dot pattern. Deliberately hand-placed rather than randomised like
+      the lines: this reads as a designed frame, and random placement tends to
+      clump shapes in the middle where the ballot content sits.
+    */}
+    <div id="bg-shapes" aria-hidden="true">
+      <span class="bg-shape bg-shape--circle"></span>
+      <span class="bg-shape bg-shape--triangle"></span>
+      <span class="bg-shape bg-shape--square"></span>
+      <span class="bg-shape bg-shape--circle"></span>
+      <span class="bg-shape bg-shape--triangle"></span>
+      <span class="bg-shape bg-shape--square"></span>
+      <span class="bg-shape bg-shape--circle"></span>
+      <span class="bg-shape bg-shape--triangle"></span>
+    </div>
+
+    <div id="bg-lines" aria-hidden="true">
+      {lines.map((line) => (
+        <span
+          class="bg-line"
+          style={`--top:${line.top}%; --dur:${line.duration}s; --delay:-${line.delay}s; --tilt:${line.tilt}deg; --drift:${line.drift}px; --scale:${line.scale}`}
+        />
+      ))}
+    </div>
+
+    {/*
+      Layer 1. The lens is BELOW .shell in the stacking order, which is what
+      guarantees it cannot distort a card — that is a property of the layout, not
+      of the filter, so it cannot regress by accident.
+    */}
+    <div id="bg-lens" aria-hidden="true"></div>
+
+    <button
+      id="theme-toggle"
+      type="button"
+      aria-label="Switch colour theme"
+      title="Theme: follows your system"
+      data-state="auto"
+    >
+      <span class="theme-toggle__icon" aria-hidden="true"></span>
+    </button>
+
     <main class="shell">
       <slot />
     </main>
+
+    <script>
+      // ---- Cursor lens -----------------------------------------------------
+      //
+      // CSS has no way to read the pointer, so this writes two numbers and CSS
+      // does the rest. It does nothing else.
+      const finePointer = window.matchMedia("(pointer: fine)");
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+      function bindLens(): void {
+        // On touch there is no cursor, so the lens should never render rather
+        // than sit stranded wherever it was last left.
+        if (!finePointer.matches || reducedMotion.matches) return;
+
+        const root = document.documentElement;
+        let x = 0;
+        let y = 0;
+        let queued = false;
+
+        // Pointer events fire far more often than frames; coalesce to one write
+        // per frame rather than one per event.
+        const paint = () => {
+          queued = false;
+          root.style.setProperty("--mx", String(x));
+          root.style.setProperty("--my", String(y));
+        };
+
+        window.addEventListener(
+          "pointermove",
+          (event) => {
+            x = event.clientX;
+            y = event.clientY;
+            if (!queued) {
+              queued = true;
+              requestAnimationFrame(paint);
+            }
+          },
+          { passive: true },
+        );
+
+        // Park it off-screen when the cursor leaves, so it does not hang at the
+        // last known position over a card.
+        document.addEventListener("pointerleave", () => {
+          root.style.setProperty("--mx", "-999");
+          root.style.setProperty("--my", "-999");
+        });
+
+        root.dataset.lens = "on";
+      }
+
+      bindLens();
+
+      // ---- Theme toggle ----------------------------------------------------
+      //
+      // Three states. "auto" removes the attribute entirely so the
+      // prefers-color-scheme media query takes over again.
+      const toggle = document.getElementById("theme-toggle");
+
+      if (toggle) {
+        const ORDER = ["auto", "light", "dark"] as const;
+        type Theme = (typeof ORDER)[number];
+
+        const LABEL: Record<Theme, string> = {
+          auto: "Theme: follows your system",
+          light: "Theme: light",
+          dark: "Theme: dark",
+        };
+
+        function read(): Theme {
+          try {
+            const stored = localStorage.getItem("theme");
+            if (stored === "light" || stored === "dark") return stored;
+          } catch {
+            /* ignore */
+          }
+          return "auto";
+        }
+
+        function apply(theme: Theme): void {
+          if (theme === "auto") delete document.documentElement.dataset.theme;
+          else document.documentElement.dataset.theme = theme;
+
+          toggle!.dataset.state = theme;
+          toggle!.title = LABEL[theme];
+          // The accessible name has to say the CURRENT state — a static
+          // "toggle theme" tells a screen reader nothing about what is active.
+          toggle!.setAttribute("aria-label", `${LABEL[theme]}. Activate to change.`);
+
+          try {
+            if (theme === "auto") localStorage.removeItem("theme");
+            else localStorage.setItem("theme", theme);
+          } catch {
+            /* Storage blocked — the choice just will not survive a reload. */
+          }
+        }
+
+        apply(read());
+
+        toggle.addEventListener("click", () => {
+          const next = ORDER[(ORDER.indexOf(read()) + 1) % ORDER.length]!;
+          apply(next);
+        });
+      }
+    </script>
   </body>
 </html>

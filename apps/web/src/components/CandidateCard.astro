@@ -2,7 +2,12 @@
 import type { Candidate } from "@avs/shared";
 
 interface Props {
-  candidate: Candidate;
+  /**
+   * Widened with an optional `description` so the detail panel is wired up
+   * before the column exists. When `Candidate` gains the field in
+   * @avs/shared, this starts rendering with no change here or in index.astro.
+   */
+  candidate: Candidate & { description?: string };
   /** The first row is above the fold on most screens; the rest can load lazily. */
   eager?: boolean;
 }
@@ -25,6 +30,13 @@ const { candidate, eager = false } = Astro.props;
       decoding="async"
       fetchpriority={eager ? "high" : "auto"}
     />
+
+    {/*
+      Rendered only when there is something to show, so the dwell does not
+      reveal an empty panel while the field is still absent. The card still
+      scales on dwell either way.
+    */}
+    {candidate.description && <p class="card__details">{candidate.description}</p>}
   </div>
 
   <div class="card__body">

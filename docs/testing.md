@@ -22,7 +22,7 @@ actual routing, middleware chain and handlers with a stub `env` and get a real `
 
 ## What is covered
 
-87 tests across six files.
+92 tests across six files.
 
 | File | Covers |
 | --- | --- |
@@ -40,19 +40,19 @@ The parts worth knowing are covered on purpose:
   invisible in a browser with JS on.
 - **The token field name.** Turnstile's implicit rendering injects `cf-turnstile-response`; the
   markup never names it. If that string drifts, every no-JS vote silently fails verification.
-- **Ordering: Turnstile is checked before the DO gate.** A request already doomed by a failed
-  challenge must not claim the gate — a claim cannot be deleted, so it would lock that voter out
-  permanently. There is a test asserting the gate stays unclaimed on a failed challenge.
+- **Ordering: Turnstile is checked before the database is written to.** A request already doomed by
+  a failed challenge must not reach D1. There is a test asserting `recordVote` is never called on a
+  failed challenge.
 - **Failing closed.** A Turnstile outage returns `false`, not a free pass.
 - **`app.onError`.** A thrown D1 error and a missing secret both come back as `server_error` JSON,
   not Hono's plain-text 500 that the ballot's fetch handler cannot parse.
 
 ## What is NOT covered, and why
 
-- **Real D1 SQL.** The tests mock the `@avs/db` boundary, so the Drizzle query builder, the `LEFT
-  JOIN`, the `ON CONFLICT` behaviour and the UNIQUE indexes are not exercised. Those need a real
-  database.
-- **Durable Object storage.** `RateLimiter` is stubbed with equivalent behaviour, not run. Their persistence, single-threading and per-colo identity are workerd properties.
+- **Real D1 SQL.** The tests mock the `@avs/db` boundary, so the Drizzle query builder, the
+  `ON CONFLICT` behaviour, the UNIQUE index and the tally increment are not exercised. Those need a
+  real database — the recount query in [vote-integrity.md](./vote-integrity.md) is what checks them.
+- **Durable Object storage.** `RateLimiter` is stubbed with equivalent behaviour, not run. Its persistence, single-threading and per-colo identity are workerd properties.
 - **The Workers Cache API.** `caches` is undefined in Bun, so `lib/cache.ts` takes its in-memory
   fallback — the same path `astro dev` uses. Real per-colo edge caching is untested.
 - **`.astro` files.** Not typechecked at all (TypeScript 7 blocks `astro check`); `astro build` is
@@ -76,10 +76,11 @@ exists *and* it was seeded — three separate ways a deploy looks fine and is us
 
 It is **read-only** and never casts a vote, so CI never adds rows to a real tally.
 
-One assertion is a specific regression guard — the ballot must contain **exactly one** Turnstile
-widget. The widget was originally rendered inside each `CandidateCard`, so a twenty-candidate ballot
-shipped twenty challenge widgets. That is invisible to unit tests and to a build, and only obvious
-when you look at the deployed page.
+Two assertions are specific regression guards. The ballot must contain **exactly one** Turnstile
+widget — it was originally rendered inside each `CandidateCard`, so a twenty-candidate ballot shipped
+twenty challenge widgets. And it must contain the inline confirmation section, whose absence would
+silently send voting back to a full navigation and raise the request budget by 50%. Both are
+invisible to unit tests and to a build, and only obvious on the deployed page.
 
 The pipeline runs this against staging before production is reachable at all — see
 [ci-pipeline.md](./ci-pipeline.md).

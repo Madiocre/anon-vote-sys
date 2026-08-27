@@ -9,7 +9,7 @@ Two committed workflows. Push, and they run.
 
 ## Production is not directly reachable
 
-`deploy.yml` is four jobs chained with `needs`:
+`deploy.yaml` is four jobs chained with `needs`:
 
 ```
 check  ->  staging  ->  smoke  ->  production
@@ -27,7 +27,7 @@ required reviewer to that environment in repo settings and the job waits for app
 
 ## The two testing phases
 
-**Phase one, offline:** `bun run check` — typecheck plus 87 unit tests, every binding stubbed. Fast,
+**Phase one, offline:** `bun run check` — typecheck plus 92 unit tests, every binding stubbed. Fast,
 runs on forks, catches logic and type regressions.
 
 **Phase two, against a live deployment:** `scripts/smoke.ts`, run against the staging URL that
@@ -160,8 +160,8 @@ both cases and the *build* step is the one that branches.
 ## Deploying to staging
 
 Actions tab → Deploy → Run workflow → target `staging`. It builds with `CLOUDFLARE_ENV=staging` and
-deploys to the `anon-vote-sys-staging` Worker, which has its own D1, its own Durable Object
-namespaces and its own rate limiter — so a test vote there cannot reach the live tally.
+deploys to the `anon-vote-sys-staging` Worker, which has its own D1 and its own Durable Object
+namespace — so a test vote there cannot reach the live tally.
 
 ## The gate
 

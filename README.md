@@ -1,7 +1,7 @@
 # anon-vote-sys
 
 Anonymous public voting on Cloudflare Workers — one Astro app with Hono mounted underneath it,
-D1 for storage, and two Durable Objects (a one-shot vote gate and a rate limiter).
+D1 for storage, and a Durable Object rate limiter.
 
 Architecture decisions and their reasoning live in `../CLAUDE.md`. Read the relevant section
 before changing anything it covers.
@@ -12,8 +12,9 @@ before changing anything it covers.
 | --- | --- |
 | [docs/deployment.md](docs/deployment.md) | Deploying to Cloudflare — pre-deploy gates, ordered commands, post-deploy checks, and the pre-launch reset |
 | [docs/images.md](docs/images.md) | Candidate images via jsDelivr: the public assets repo, why tags and never branches |
-| [docs/ci-pipeline.md](docs/ci-pipeline.md) | Cloudflare Workers Builds — build settings, the staging split, and why the environment is chosen at build time |
-| [docs/testing.md](docs/testing.md) | What the 87 server tests cover, what they deliberately do not, and how they run outside workerd |
+| [docs/ci-pipeline.md](docs/ci-pipeline.md) | GitHub Actions — the check → staging → smoke → production promotion chain, and why the environment is chosen at build time |
+| [docs/testing.md](docs/testing.md) | What the 92 server tests cover, what they deliberately do not, and how they run outside workerd |
+| [docs/capacity.md](docs/capacity.md) | What one vote costs in Worker requests, D1 rows and DO calls — and where the free-tier ceiling actually sits |
 | [docs/vote-integrity.md](docs/vote-integrity.md) | What stops duplicate votes, why IP cannot be an enforcement key at scale, and what is still outstanding |
 | [docs/edgecases.md](docs/edgecases.md) | Adding and removing candidates, shared IPs, cleared cookies — the niche cases with destructive consequences |
 
@@ -48,7 +49,7 @@ cd packages/db && bun run migrate:local && bun run seed:local
 | Command | What it does |
 | --- | --- |
 | `bun run check` | Typecheck + tests — the same gate CI runs |
-| `bun run test` | 87 server tests |
+| `bun run test` | 92 server tests |
 | `bun run typecheck` | Typechecks all three workspaces |
 | `cd apps/web && bun run dev` | Astro dev server |
 | `cd apps/web && bun run build` | Production build |
@@ -67,7 +68,7 @@ cd packages/db && bun run migrate:local && bun run seed:local
 
 Feature-complete and running in dev. Schema, migrations and seeds are done; the Hono app is mounted
 through `src/pages/api/[...route].ts`; the ballot, results and thank-you pages are in place with
-Turnstile wired into every card.
+a single Turnstile widget for the whole ballot.
 
 Not yet deployed. Before a first deploy you need a real Turnstile widget, the candidate images
 published, and the three secrets set — [docs/deployment.md](docs/deployment.md) walks through it in
@@ -78,7 +79,7 @@ Known gaps, both deliberate:
 - **`.astro` files are not typechecked.** `astro check` cannot run against TypeScript 7 — its
   language server needs a programmatic API the native compiler does not expose yet. `astro build`
   catches syntax, import and template errors in those files, but not frontmatter type errors.
-- **Tests stop at the workerd boundary.** The 87 server tests cover the request logic, but real D1
+- **Tests stop at the workerd boundary.** The 92 server tests cover the request logic, but real D1
   SQL, Durable Object persistence and the Workers Cache API are stubbed — covering those needs
   `@cloudflare/vitest-pool-workers`. See [docs/testing.md](docs/testing.md).
 
